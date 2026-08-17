@@ -1,0 +1,2446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MbahGPT</title>
+<link rel="stylesheet" href="/vendor/ionic/css/ionic.bundle.css">
+<style>
+  :root {
+    --bg: #faf8f5;
+    --panel: #ffffff;
+    --side: #f5f2ec;
+    --line: #e7e2d9;
+    --text: #1b1917;
+    --muted: #7a736a;
+    --accent: #b45309;
+    --accent-tint: #fdf3e7;   /* accent at reading strength on a light ground */
+    --user-bg: #f1ece3;
+    --code-bg: #f6f3ee;
+    --hover: #ece7de;
+    --shadow-sm: 0 1px 2px rgba(28, 25, 20, .06);
+    --shadow-md: 0 4px 16px rgba(28, 25, 20, .09);
+    --glass: rgba(255, 255, 255, .78);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141310;
+      --panel: #1c1a17;
+      --side: #191712;
+      --line: #2f2b25;
+      --text: #ece8e1;
+      --muted: #a09890;
+      --accent: #f0a04b;
+      --accent-tint: #2a2018;
+      --user-bg: #24211c;
+      --code-bg: #100f0c;
+      --hover: #262219;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
+      --shadow-md: 0 6px 22px rgba(0, 0, 0, .45);
+      --glass: rgba(28, 26, 23, .78);
+    }
+  }
+  * { box-sizing: border-box; }
+
+  /* Map our palette onto Ionic's tokens so its chrome matches the transcript. */
+  :root {
+    --ion-background-color: var(--bg);
+    --ion-text-color: var(--text);
+    --ion-border-color: var(--line);
+    --ion-toolbar-background: var(--panel);
+    --ion-item-background: transparent;
+    --ion-font-family: ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+    --ion-color-primary: var(--accent);
+  }
+  ion-menu { --background: var(--side); --width: 16rem; }
+  /* Toolbars float over the content instead of sitting in a hard band. */
+  ion-header ion-toolbar, ion-footer ion-toolbar {
+    --background: var(--glass);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    backdrop-filter: saturate(180%) blur(14px);
+  }
+  ion-header { box-shadow: var(--shadow-sm); }
+  ion-split-pane {
+    /* Deliberately NOT setting --border here: custom properties inherit, so it
+       would shadow our own --border token for every descendant. Ionic falls
+       back to --ion-border-color, which :root already maps to that token. */
+    --side-width: 16rem;
+    --side-min-width: 16rem;
+    --side-max-width: 16rem;
+  }
+  /* Ionic's Material buttons shout in uppercase; this app reads better plain. */
+  ion-button::part(native) { text-transform: none; letter-spacing: 0; }
+  ion-button { --box-shadow: none; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+  }
+  /* Ionic's form controls are *scoped*, not shadow DOM — their inner <textarea>
+     and <input> sit in the light DOM. A bare `textarea, input` rule would
+     restyle them and fight the component, so target only the native controls
+     this app owns. */
+  #instructions, #memText, input.rename {
+    font: inherit;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: .4rem .6rem;
+  }
+  #instructions:focus, #memText:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { cursor: pointer; font: inherit; color: var(--text); }
+  button:disabled { opacity: .5; cursor: default; }
+
+  /* --- session list inside the menu -------------------------------------- */
+  ion-menu .top { padding: .6rem; }
+  ion-menu .bottom { padding: .4rem .6rem; }
+  #sessions { padding: .4rem; }
+  .session {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    border-radius: 12px;
+    padding: .5rem .6rem;
+    cursor: pointer;
+    transition: background .12s ease;
+  }
+  .session:hover { background: var(--hover); }
+  .session.active {
+    background: var(--accent-tint);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  .session.active .name { font-weight: 600; }
+  .session .meta { flex: 1; min-width: 0; }
+  .session .name {
+    display: block;
+    font-size: .85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .session .sub {
+    display: block;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .64rem;
+    color: var(--muted);
+    margin-top: .1rem;
+  }
+  /* Row actions: rename and delete, revealed on hover or when active. */
+  .session .act {
+    border: 0;
+    background: none;
+    color: var(--muted);
+    padding: 0 .28rem;
+    border-radius: 6px;
+    opacity: 0;
+    font-size: .95rem;
+    line-height: 1;
+  }
+  .session:hover .act, .session.active .act { opacity: .75; }
+  .session .act:hover { opacity: 1; color: var(--accent); }
+  .rowmenu {
+    position: fixed;
+    z-index: 60;
+    min-width: 10.5rem;
+    padding: .3rem;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--shadow-md);
+  }
+  .rowmenu[hidden] { display: none; }
+  .rowmenu button {
+    text-align: left;
+    background: none;
+    border: 0;
+    border-radius: 8px;
+    padding: .5rem .6rem;
+    font-size: .87rem;
+  }
+  .rowmenu button:hover { background: var(--hover); }
+  .rowmenu button.danger { color: #dc2626; }
+  .session input.rename {
+    width: 100%;
+    font-size: .85rem;
+    padding: .15rem .3rem;
+  }
+  /* Unread / running marker on a session row. */
+  .session .dot {
+    width: .5rem;
+    height: .5rem;
+    border-radius: 50%;
+    background: var(--accent);
+    flex: 0 0 auto;
+  }
+  .session .dot.live { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+  .side-empty { color: var(--muted); font-size: .78rem; padding: .6rem .5rem; }
+
+  /* --- preferences & memory panel ---------------------------------------- */
+  ion-modal { --background: var(--bg); --width: min(40rem, 100%); }
+  #instructions { width: 100%; }
+  #prefs h3 {
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--muted);
+    margin: 1.2rem 0 .4rem;
+  }
+  #prefs p.note { font-size: .76rem; color: var(--muted); margin: .35rem 0 0; }
+  #instructions { width: 100%; min-height: 6rem; resize: vertical; }
+  .row { display: flex; gap: .5rem; align-items: center; }
+  .row input[type=text] { flex: 1; }
+
+  .mem {
+    display: flex;
+    align-items: flex-start;
+    gap: .5rem;
+    padding: .45rem .5rem;
+    border-radius: 8px;
+    border: 1px solid transparent;
+  }
+  .mem:hover { background: var(--hover); }
+  .mem .text { flex: 1; font-size: .87rem; overflow-wrap: anywhere; }
+  .mem .when { display: block; font-size: .68rem; color: var(--muted); }
+  .mem button {
+    border: 0;
+    background: none;
+    color: var(--muted);
+    padding: .1rem .3rem;
+    border-radius: 6px;
+    font-size: .95rem;
+    line-height: 1.2;
+  }
+  .mem button:hover { color: var(--text); }
+  .mem button.rm:hover { color: #dc2626; }
+  .mem.pinned { background: var(--user-bg); }
+  .mem.pinned .pin { color: var(--accent); }
+
+  ion-button[hidden] { display: none; }
+  .sources {
+    margin-top: .9rem;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: .65rem .85rem;
+    font-size: .8rem;
+  }
+  .sources .head {
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .66rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-bottom: .25rem;
+  }
+  .sources ol { margin: 0; padding-left: 1.2rem; }
+  .sources li { margin: .1rem 0; }
+  .sources a { color: var(--accent); }
+  .sources .host { color: var(--muted); font-size: .74rem; }
+
+  /* Chip shown in the transcript when a message stored something. */
+  .saved-chip {
+    display: inline-block;
+    font-size: .7rem;
+    color: var(--muted);
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: .15rem .6rem;
+    margin-top: .4rem;
+  }
+
+  /* --- main column -------------------------------------------------------- */
+  #main { display: flex; flex-direction: column; min-width: 0; }
+  /* Floating drawer button; ion-menu-button hides itself when the menu is
+     disabled, which is exactly the split-pane (desktop) case. */
+  #menuFab {
+    position: absolute;
+    top: .55rem;
+    left: .55rem;
+    z-index: 5;
+    --border-radius: 50%;
+    --background: var(--panel);
+    --color: var(--text);
+    --padding-start: .3rem;
+    --padding-end: .3rem;
+    box-shadow: var(--shadow-sm);
+    border-radius: 50%;
+  }
+  /* The log scrolls inside its own wrapper so the follow button can float
+     over it without moving when the composer grows. */
+  #logwrap { flex: 1; position: relative; display: flex; min-height: 0; }
+  #log { flex: 1; overflow-y: auto; padding: 1.6rem 1rem .5rem; scroll-behavior: auto; }
+
+  #follow {
+    position: absolute;
+    left: 50%;
+    bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    padding: .35rem .7rem;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-md);
+    font-size: .78rem;
+    color: var(--muted);
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, .5rem);
+    transition: opacity .15s ease, transform .15s ease;
+  }
+  #follow.show { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+  #follow:hover { color: var(--text); border-color: var(--accent); }
+  #follow .arrow { font-size: .9rem; line-height: 1; }
+  /* A dot marks content that arrived while scrolled away. */
+  #follow .dot {
+    width: .45rem;
+    height: .45rem;
+    border-radius: 50%;
+    background: var(--accent);
+    display: none;
+  }
+  #follow.pending .dot { display: block; }
+  .wrap { max-width: 44rem; margin: 0 auto; }
+  .msg { margin-bottom: 1.6rem; }
+
+  /* The speaker label is metadata, so it wears the monospace of the tool. */
+  .role {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .64rem;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    color: var(--muted);
+    margin-bottom: .4rem;
+  }
+  .body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.72; }
+
+  /* What you said sits right, in a tinted card; what the model said runs full
+     width as a document. The asymmetry is what makes a transcript scannable. */
+  .msg.user { display: flex; flex-direction: column; align-items: flex-end; }
+  .msg.user .role { display: none; }
+  .msg.user .body {
+    background: var(--user-bg);
+    padding: .7rem 1rem;
+    border-radius: 18px 18px 4px 18px;
+    max-width: min(85%, 34rem);
+    box-shadow: var(--shadow-sm);
+  }
+  /* A small mark stands in for the assistant's name row. */
+  .msg.assistant .role { display: flex; align-items: center; gap: .45rem; }
+  .msg.assistant .role::before {
+    content: "";
+    width: .5rem;
+    height: .5rem;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* Assistant replies are rendered markdown, so blocks provide the spacing
+     and pre-wrap would double it up. */
+  .msg.assistant .body { white-space: normal; }
+  .body > :first-child { margin-top: 0; }
+  .body > :last-child { margin-bottom: 0; }
+  .body p { margin: 0 0 .85rem; }
+  .body h1, .body h2, .body h3, .body h4, .body h5, .body h6 {
+    margin: 1.4rem 0 .55rem;
+    line-height: 1.28;
+    font-weight: 650;
+    letter-spacing: -.011em;
+  }
+  .body h1 { font-size: 1.3rem; }
+  .body h2 { font-size: 1.15rem; }
+  .body h3 { font-size: 1.02rem; }
+  .body h4, .body h5, .body h6 { font-size: .95rem; color: var(--muted); }
+  .body ul, .body ol { margin: 0 0 .7rem; padding-left: 1.4rem; }
+  .body li { margin: .15rem 0; }
+  .body li > ul, .body li > ol { margin: .15rem 0; }
+  .body blockquote {
+    margin: 0 0 .85rem;
+    padding: .2rem 0 .2rem .9rem;
+    border-left: 2px solid var(--accent);
+    color: var(--muted);
+  }
+  .body hr { border: 0; border-top: 1px solid var(--line); margin: 1rem 0; }
+  .body a { color: var(--accent); }
+  .body strong { font-weight: 650; }
+  .body :not(pre) > code {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: .06em .32em;
+    font-size: .88em;
+  }
+  .table-wrap { overflow-x: auto; margin: 0 0 .7rem; }
+  .body table { border-collapse: collapse; font-size: .9em; border-radius: 10px; overflow: hidden; }
+  .body th, .body td {
+    border: 1px solid var(--line);
+    padding: .35rem .6rem;
+    text-align: left;
+  }
+  .body th { background: var(--user-bg); font-weight: 600; }
+  .msg.error .body {
+    color: #dc2626;
+    border-left: 3px solid #dc2626;
+    padding-left: .7rem;
+  }
+  .err-actions { display: flex; gap: .4rem; margin-top: .5rem; }
+  .err-actions button {
+    font-size: .8rem;
+    padding: .25rem .6rem;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .err-actions button:hover { border-color: var(--accent); }
+  .err-actions button.ghost { color: var(--muted); }
+  /* --- copy affordances --------------------------------------------------- */
+  .code-wrap { position: relative; }
+  .code-wrap .copy-btn { position: absolute; top: .45rem; right: .45rem; }
+  .copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.85rem;
+    height: 1.85rem;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0;
+    opacity: 0;
+    transition: opacity .12s ease, color .12s ease, border-color .12s ease;
+  }
+  .code-wrap:hover .copy-btn,
+  .msg:hover .copy-btn,
+  .copy-btn:focus-visible { opacity: 1; }
+  .copy-btn:hover { color: var(--text); border-color: var(--accent); }
+  .copy-btn.done { color: var(--accent); border-color: var(--accent); opacity: 1; }
+  .copy-btn.failed { color: #dc2626; border-color: #dc2626; opacity: 1; }
+  .msg-actions { display: flex; gap: .4rem; margin-top: .5rem; }
+  /* Touch screens have no hover, so the buttons stay visible there. */
+  @media (hover: none) {
+    .copy-btn { opacity: .8; }
+  }
+
+  .body pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: .85rem 1rem;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: .86em;
+  }
+  .body code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .3rem;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 16vh;
+  }
+  .empty-mark {
+    width: 3rem;
+    height: 3rem;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--accent-tint);
+    color: var(--accent);
+    font-size: 1.3rem;
+    margin-bottom: .5rem;
+  }
+  .empty-title { color: var(--text); font-size: 1.05rem; font-weight: 600; margin: 0; }
+  .empty-sub { font-size: .84rem; margin: 0; max-width: 22rem; }
+  .cursor::after {
+    content: "▍";
+    color: var(--accent);
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Thinking models stream `reasoning` well before any answer text. */
+  details.think {
+    margin-bottom: .7rem;
+    border-left: 2px solid var(--line);
+    padding-left: .8rem;
+  }
+  details.think[open] { border-left-color: var(--accent); }
+  details.think summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: .78rem;
+    list-style: none;
+  }
+  details.think summary::-webkit-details-marker { display: none; }
+  details.think summary::before { content: "▸ "; }
+  details.think[open] summary::before { content: "▾ "; }
+  details.think .reasoning {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--muted);
+    font-size: .84rem;
+    margin-top: .4rem;
+    max-height: 14rem;
+    overflow-y: auto;
+  }
+
+  ion-footer ion-toolbar { --padding-start: .7rem; --padding-end: .7rem;
+                           --padding-top: .5rem; --padding-bottom: .5rem; }
+
+  /* --- composer: one rounded surface -------------------------------------- */
+  .composer {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 26px;
+    padding: .7rem .8rem .55rem 1.05rem;
+    box-shadow: var(--shadow-md);
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .composer:focus-within {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-tint);
+  }
+  #input {
+    width: 100%;
+    --background: transparent;
+    --padding-start: 0;
+    --padding-end: 0;
+    --padding-top: 0;
+    --padding-bottom: 0;
+    --highlight-height: 0;          /* no Material underline inside the pill */
+    --placeholder-opacity: .55;
+    min-height: 2.6rem;
+    font-size: 1rem;
+  }
+  /* Scoped component: reach the real control directly. Width is explicit —
+     a bare <textarea> falls back to its 20-column default, which would leave
+     most of the composer unclickable. */
+  #input textarea {
+    width: 100%;
+    resize: none;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    max-height: 11rem;
+    overflow-y: auto;
+  }
+  /* The composer border already signals focus; a second ring inside it is noise. */
+  #input textarea:focus { outline: none; }
+  .composer-bar {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    margin-top: .3rem;
+  }
+  .composer-bar { justify-content: flex-end; }
+  #attachBtn { margin-right: auto; font-size: 1.35rem; --color: var(--muted); }
+  #attachBtn:hover { --color: var(--accent); }
+
+  /* --- tool activity ------------------------------------------------------ */
+  details.tool {
+    margin: 0 0 .7rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--code-bg);
+    overflow: hidden;
+  }
+  details.tool summary {
+    cursor: pointer;
+    list-style: none;
+    padding: .45rem .7rem;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .74rem;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+  }
+  details.tool summary::-webkit-details-marker { display: none; }
+  details.tool summary::before { content: "▸"; }
+  details.tool[open] summary::before { content: "▾"; }
+  details.tool summary .ok { color: var(--accent); }
+  details.tool summary .bad { color: #dc2626; }
+  details.tool pre {
+    margin: 0;
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    font-size: .78rem;
+    max-height: 18rem;
+    overflow: auto;
+  }
+  details.tool .label {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .64rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: .4rem .7rem 0;
+  }
+
+  /* --- attachments -------------------------------------------------------- */
+  .attach-preview { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .attach-preview:not(:empty) { margin: .1rem 0 .5rem; }
+  .attach-chip {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    max-width: 15rem;
+    padding: .25rem .3rem .25rem .5rem;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--code-bg);
+    font-size: .76rem;
+  }
+  .attach-chip img { width: 1.6rem; height: 1.6rem; object-fit: cover; border-radius: 5px; }
+  .attach-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attach-chip .sz { color: var(--muted); font-size: .68rem; }
+  .attach-chip button {
+    border: 0; background: none; color: var(--muted);
+    padding: 0 .2rem; border-radius: 5px; font-size: .95rem; line-height: 1;
+  }
+  .attach-chip button:hover { color: #dc2626; }
+
+  /* On a message: images show, documents stay as links. */
+  .msg-files { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: .45rem; }
+  .msg.user .msg-files { justify-content: flex-end; }
+  .msg-files img {
+    min-width: 4rem;
+    min-height: 3rem;
+    background: var(--code-bg);
+    max-width: 13rem;
+    max-height: 13rem;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    display: block;
+  }
+  .msg-files .doc {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    padding: .3rem .6rem;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--code-bg);
+    font-size: .78rem;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .msg-files .doc:hover { border-color: var(--accent); }
+
+  /* Circular send / stop, sitting inside the composer. */
+  .round-action {
+    --border-radius: 50%;
+    --padding-start: 0;
+    --padding-end: 0;
+    --box-shadow: none;
+    width: 2.75rem;      /* 44px: comfortable touch target */
+    height: 2.75rem;
+    margin: 0;
+    font-size: 1.15rem;
+    line-height: 1;
+  }
+  .round-action::part(native) { border-radius: 50%; }
+
+  #instructions { resize: vertical; }
+  .hint { font-size: .72rem; color: var(--muted); margin: .4rem 0 0 1.1rem; }
+  .hint:empty { display: none; }
+
+  /* ion-split-pane handles the sidebar/drawer switch; these are the touch
+     adjustments for narrow screens. */
+  @media (max-width: 767px) {
+    #log { padding: .9rem .7rem 0; }
+    .wrap { max-width: none; }
+    .msg { margin-bottom: 1rem; }
+    .hint { margin-left: .6rem; }
+  }
+</style>
+<script type="module">
+  // Ionic is not committed to the repo; ./fetch-vendor.sh installs it. Say so
+  // plainly instead of leaving an unstyled page with no explanation.
+  try {
+    const { setNonce } = await import('/vendor/ionic/ionic.esm.js');
+    // The server stamps a fresh nonce on the inline tags; hand the same one to
+    // Ionic so its runtime-injected styles satisfy the policy.
+    const nonce = document.querySelector('style')?.nonce;
+    if (nonce) setNonce(nonce);
+  } catch (e) {
+    const banner = document.createElement('p');
+    banner.style.cssText = 'padding:1rem;margin:0;color:#dc2626;'
+      + 'font:15px ui-sans-serif,system-ui,sans-serif';
+    banner.textContent = 'UI assets are missing. Run ./fetch-vendor.sh in the '
+      + 'project folder, then reload.';
+    document.body.prepend(banner);
+  }
+</script>
+</head>
+<body>
+
+<ion-app>
+<ion-split-pane content-id="main" when="md">
+
+  <!-- On phones this is a swipeable drawer; from tablets up it is pinned open. -->
+  <ion-menu content-id="main" menu-id="chats" type="overlay">
+    <ion-header>
+      <ion-toolbar>
+        <ion-title size="small">MbahGPT</ion-title>
+      </ion-toolbar>
+    </ion-header>
+    <ion-content>
+      <div class="top"><ion-button id="new" expand="block" fill="outline" size="small">+ Chat baru</ion-button></div>
+      <div id="sessions"></div>
+    </ion-content>
+    <ion-footer>
+      <div class="bottom">
+        <ion-button id="openPrefs" expand="block" fill="clear" size="small">⚙ Preferensi &amp; memori</ion-button>
+      </div>
+    </ion-footer>
+  </ion-menu>
+
+  <div class="ion-page" id="main">
+    <!-- No toolbar above the transcript: the chat has the whole column. The
+         drawer button only appears when the split pane collapses (phones),
+         where it is the sole way to reach the session list. -->
+    <div id="logwrap">
+      <ion-menu-button menu="chats" id="menuFab"></ion-menu-button>
+      <div id="log"><div class="wrap">
+        <div class="empty">
+          <div class="empty-mark">✦</div>
+          <p class="empty-title">Mulai percakapan</p>
+          <p class="empty-sub">Ketik pesan di bawah. Awali dengan /web untuk memaksa pencarian.</p>
+        </div>
+      </div></div>
+      <button id="follow" type="button" aria-label="Scroll to latest">
+        <span class="dot"></span><span class="arrow">↓</span> Latest
+      </button>
+    </div>
+
+    <ion-footer>
+      <ion-toolbar>
+        <form id="form">
+          <!-- One rounded surface: the typing area is the composer, and the
+               controls sit inside it rather than competing beside it. -->
+          <div class="composer">
+            <ion-textarea id="input" rows="1"
+                          placeholder="Ketik pesan…" enterkeyhint="send"></ion-textarea>
+            <div id="attachPreview" class="attach-preview"></div>
+            <div class="composer-bar">
+              <input type="file" id="fileInput" multiple hidden
+                     accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.txt,.md,.csv,.json,.log,.py,.js,.ts,.html,.css,.yml,.yaml,.xml,.sql,.sh">
+              <ion-button id="attachBtn" fill="clear" class="round-action"
+                          title="Lampirkan gambar atau dokumen"
+                          aria-label="Lampirkan berkas">+</ion-button>
+              <!-- One control, two roles: send while idle, stop while the
+                   model answers. Two buttons in the same spot only ever gave
+                   one of them anything to do. -->
+              <ion-button id="action" type="submit" class="round-action"
+                          aria-label="Kirim pesan">↑</ion-button>
+            </div>
+          </div>
+        </form>
+        <!-- Empty by default and hidden while empty: this line is for status
+             ("menunggu jawaban", "maksimal 3 chat"), not for standing tips. -->
+        <p class="hint" id="hint" role="status"></p>
+      </ion-toolbar>
+    </ion-footer>
+  </div>
+</ion-split-pane>
+</ion-app>
+
+<!-- Plain menu rather than ion-popover: its dismiss() never settled when
+     presented from a bare click, which left actions queued forever. -->
+<div id="rowMenu" class="rowmenu" role="menu" hidden>
+  <button type="button" role="menuitem" id="menuRename">Ubah judul</button>
+  <button type="button" role="menuitem" id="menuDelete" class="danger">Hapus chat</button>
+</div>
+
+<ion-modal id="overlay">
+  <ion-header>
+    <ion-toolbar>
+      <ion-title size="small">Preferensi &amp; memori</ion-title>
+      <ion-buttons slot="end">
+        <ion-button id="closePrefs" aria-label="Tutup">Tutup</ion-button>
+      </ion-buttons>
+    </ion-toolbar>
+  </ion-header>
+  <ion-content class="ion-padding">
+    <div id="prefs">
+      <h3>Instruksi jawaban</h3>
+      <textarea id="instructions" placeholder="mis. Jawab ringkas. Utamakan poin. Selalu sertakan satuan."></textarea>
+      <div class="row" style="margin-top:.5rem">
+        <ion-button id="saveInstructions" size="small">Simpan</ion-button>
+        <span id="prefsStatus" class="note"></span>
+      </div>
+      <p class="note">Dikirim sebagai system message pada setiap permintaan, di semua chat.</p>
+
+      <h3>Memori</h3>
+      <div class="row">
+        <input id="memText" type="text" placeholder="Tambahkan hal yang perlu diingat…">
+        <ion-button id="memAdd" size="small">Tambah</ion-button>
+      </div>
+      <p class="note">
+        Saved automatically when a message starts with <strong>remember…</strong>,
+        <strong>note to self…</strong>, <strong>keep in mind…</strong>,
+        <strong>don't forget…</strong>, or <strong>for future reference…</strong>.
+        Pinned memories are always included; the rest are picked by relevance.
+      </p>
+      <div id="memList"></div>
+    </div>
+  </ion-content>
+</ion-modal>
+
+<script>
+const log = document.querySelector('#log .wrap');
+const input = document.getElementById('input');
+const form = document.getElementById('form');
+const actionBtn = document.getElementById('action');
+const hint = document.getElementById('hint');
+const sessionList = document.getElementById('sessions');
+const defaultHint = '';   // idle means: say nothing
+
+let sessionId = null;   // null until the first message creates a row
+
+// Replies keep running when you switch away, so state cannot live in one
+// global: every in-flight request is its own record, keyed by session. A
+// record only draws to the screen while its session is the one on display.
+const MAX_CONCURRENT = 3;
+const streams = new Map();   // key -> stream record
+const unread = new Set();    // sessions that finished while you were elsewhere
+let tempKey = 0;             // stands in until the server assigns a session id
+
+// With the toolbar gone, the open chat names the browser tab.
+function setPageTitle(name) {
+  document.title = name ? name + ' — MbahGPT' : 'MbahGPT';
+}
+
+function currentKey() {
+  return sessionId === null ? null : 's' + sessionId;
+}
+
+function currentStream() {
+  for (const rec of streams.values()) {
+    if (rec.sessionId === sessionId && sessionId !== null) return rec;
+    if (rec.sessionId === null && rec.viewing) return rec;
+  }
+  return null;
+}
+
+// --- attachments -----------------------------------------------------------
+const fileInput = document.getElementById('fileInput');
+const attachPreview = document.getElementById('attachPreview');
+let pending = [];            // files staged for the next message
+let limits = { max_files: 6, max_upload: 8 * 1024 * 1024 };
+
+fetch('/api/config').then(r => r.json()).then(d => { limits = { ...limits, ...d }; })
+  .catch(() => { /* defaults are fine */ });
+
+function humanSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error || new Error('gagal membaca berkas'));
+    fr.readAsDataURL(file);
+  });
+}
+
+document.getElementById('attachBtn').addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', async () => {
+  for (const file of [...fileInput.files]) {
+    if (pending.length >= limits.max_files) {
+      hint.textContent = 'Maksimal ' + limits.max_files + ' berkas per pesan.';
+      break;
+    }
+    const total = pending.reduce((n, p) => n + p.size, 0) + file.size;
+    if (total > limits.max_upload) {
+      hint.textContent = 'Total lampiran melebihi ' + humanSize(limits.max_upload) + '.';
+      break;
+    }
+    try {
+      const url = await readAsDataUrl(file);
+      pending.push({
+        name: file.name,
+        mime: file.type || '',
+        size: file.size,
+        data: url.split(',')[1],
+        preview: file.type.startsWith('image/') ? url : null,
+      });
+    } catch (e) {
+      hint.textContent = 'Gagal membaca ' + file.name;
+    }
+  }
+  fileInput.value = '';       // so the same file can be picked again
+  renderPending();
+  syncComposer();
+});
+
+function renderPending() {
+  attachPreview.textContent = '';
+  pending.forEach((p, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'attach-chip';
+    if (p.preview) {
+      const img = document.createElement('img');
+      img.src = p.preview;
+      img.alt = '';
+      chip.appendChild(img);
+    }
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = p.name;
+    const sz = document.createElement('span');
+    sz.className = 'sz';
+    sz.textContent = humanSize(p.size);
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.textContent = '×';
+    rm.title = 'Hapus lampiran';
+    rm.addEventListener('click', () => {
+      pending.splice(i, 1);
+      renderPending();
+      syncComposer();
+    });
+    chip.append(nm, sz, rm);
+    attachPreview.appendChild(chip);
+  });
+}
+
+// One run of a tool, shown collapsed above the answer it feeds.
+function addToolPanel(body, name, args) {
+  const el = document.createElement('details');
+  el.className = 'tool';
+  const summary = document.createElement('summary');
+  const title = document.createElement('span');
+  title.textContent = name === 'write_file'
+    ? 'Menulis berkas ' + (args.name || '')
+    : 'Menjalankan skrip ' + (args.language || '');
+  summary.appendChild(title);
+  el.appendChild(summary);
+
+  const code = args.code || args.content;
+  if (code) {
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = name === 'write_file' ? 'isi' : 'skrip';
+    const pre = document.createElement('pre');
+    const c = document.createElement('code');
+    c.textContent = code;
+    pre.appendChild(c);
+    el.append(label, pre);
+  }
+  body.parentNode.insertBefore(el, body);
+  return { el, summary, title };
+}
+
+function finishToolPanel(panel, result) {
+  if (!panel) return;
+  const failed = result.error || (result.exit_code !== undefined && result.exit_code !== 0);
+  const mark = document.createElement('span');
+  mark.className = failed ? 'bad' : 'ok';
+  mark.textContent = failed ? '✕' : '✓';
+  panel.summary.appendChild(mark);
+
+  const text = result.error
+    || [result.stdout, result.stderr].filter(Boolean).join('\n')
+    || (result.written ? result.written + ' (' + result.bytes + ' B)' : '');
+  if (text) {
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = 'keluaran';
+    const pre = document.createElement('pre');
+    const c = document.createElement('code');
+    c.textContent = text;
+    pre.appendChild(c);
+    panel.el.append(label, pre);
+  }
+  if (failed) panel.el.open = true;   // errors are worth seeing straight away
+}
+
+// After a reply that produced files, fetch the stored copies so the links
+// point at real, downloadable attachments.
+async function refreshFiles(sessionId, body) {
+  try {
+    const d = await fetch('/api/sessions/' + sessionId).then(r => r.json());
+    const last = [...(d.messages || [])].reverse()
+      .find(m => m.role === 'assistant' && m.attachments && m.attachments.length);
+    if (last) addMessageFiles(body, last.attachments);
+  } catch (e) { /* the reload path will show them anyway */ }
+}
+
+// Files already attached to a stored message.
+function addMessageFiles(body, files) {
+  if (!files || !files.length) return;
+  const box = document.createElement('div');
+  box.className = 'msg-files';
+  for (const f of files) {
+    if (f.kind === 'image') {
+      const img = document.createElement('img');
+      img.src = f.localPreview || ('/api/attachments/' + f.id);
+      img.alt = f.name;
+      // Not lazy: before it loads the box collapses to a couple of pixels, and
+      // the lazy heuristic then never fetches it at all.
+      box.appendChild(img);
+    } else {
+      const a = document.createElement('a');
+      a.className = 'doc';
+      a.href = f.id ? '/api/attachments/' + f.id : '#';
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = '📄 ' + f.name + ' · ' + humanSize(f.size);
+      box.appendChild(a);
+    }
+  }
+  body.parentNode.insertBefore(box, body);
+}
+
+// --- copying ---------------------------------------------------------------
+// navigator.clipboard needs a secure context. 127.0.0.1 counts as one, but the
+// server can also be reached over a LAN IP, where it is unavailable — hence the
+// execCommand fallback.
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) { /* fall through to the legacy path */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Icons are built as SVG nodes, never innerHTML — same rule as the renderer.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function icon(paths) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '15');
+  svg.setAttribute('height', '15');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+const ICON_COPY = () => icon([
+  'M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2z',
+  'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
+]);
+const ICON_DONE = () => icon(['M20 6 9 17l-5-5']);
+const ICON_FAIL = () => icon(['M18 6 6 18', 'M6 6l12 12']);
+
+// Icon only: the label lives in the tooltip and the accessible name, so the
+// button stays out of the way of the text it sits on.
+function copyButton(getText, label) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'copy-btn';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+  btn.appendChild(ICON_COPY());
+
+  const show = (make, cls) => {
+    btn.textContent = '';
+    btn.appendChild(make());
+    btn.className = 'copy-btn' + (cls ? ' ' + cls : '');
+  };
+
+  btn.addEventListener('click', async e => {
+    e.stopPropagation();
+    const ok = await copyText(getText() || '');
+    show(ok ? ICON_DONE : ICON_FAIL, ok ? 'done' : 'failed');
+    btn.title = ok ? 'Tersalin' : 'Gagal menyalin';
+    setTimeout(() => {
+      show(ICON_COPY);
+      btn.title = label;
+    }, 1600);
+  });
+  return btn;
+}
+
+// The whole answer copies as its markdown source, not the rendered text —
+// pasting elsewhere should keep the headings, bold and code fences.
+function addCopyAction(body) {
+  const msg = body.closest('.msg');
+  if (!msg || msg.querySelector('.msg-actions')) return;
+  const bar = document.createElement('div');
+  bar.className = 'msg-actions';
+  bar.appendChild(copyButton(() => body._source || body.textContent, 'Salin jawaban'));
+  msg.appendChild(bar);
+}
+
+// --- markdown rendering ----------------------------------------------------
+// Everything below builds DOM nodes and sets textContent; nothing is ever
+// assigned as HTML, so model output cannot inject markup no matter what it
+// contains. Unsupported syntax degrades to the literal characters.
+
+const FENCE = /^\s*```(.*)$/;
+const HEADING = /^(#{1,6})\s+(.*)$/;
+const RULE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
+const QUOTE = /^\s*>\s?(.*)$/;
+const BULLET = /^(\s*)([-*+])\s+(.*)$/;
+const NUMBER = /^(\s*)(\d+)[.)]\s+(.*)$/;
+const TABLE_SEP = /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/;
+
+// Inline: code spans first so backticked text is never re-interpreted.
+// `_` is deliberately not an emphasis marker — it would mangle snake_case
+// and __dunder__ names, which matter more here than underscore italics.
+// Domains that become links on their own, so a bare "instagram.com/someone"
+// is clickable. Kept to a curated list: a generic \.[a-z]+ rule would turn
+// "Node.js", "index.html" or "config.json" into links.
+const TLD_SAFE = [
+  'com', 'net', 'org', 'edu', 'gov', 'info', 'biz', 'io', 'ai', 'co', 'tv',
+  'fm', 'xyz', 'dev', 'cloud', 'online', 'store', 'site', 'blog', 'news',
+  'wiki', 'social', 'link', 'page', 'shop', 'live', 'tech', 'me',
+  'uk', 'us', 'de', 'fr', 'es', 'it', 'nl', 'jp', 'kr', 'cn', 'br', 'au',
+  'ca', 'ru', 'se', 'no', 'fi', 'pl', 'tr', 'ch', 'be', 'dk', 'cz', 'pt',
+  'gr', 'nz', 'za', 'sg', 'my', 'ph', 'th', 'vn', 'hk', 'tw', 'ae', 'mx',
+].join('|');
+
+// These collide with ordinary code ("session.id", "list.at", "run.sh"), so
+// they only link when a path follows: "kompas.id/berita" yes, "session.id" no.
+const TLD_RISKY = ['id', 'at', 'in', 'is', 'sh', 'to', 'so', 'app', 'ly'].join('|');
+
+const HOST = '(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+';
+const PATH = '(?:/[^\\s<>()]*)?';
+
+// "@handle" has no platform of its own, so it is resolved from the words
+// around it: a reply about Instagram links handles to Instagram, one about
+// TikTok to TikTok. Without a platform in sight the handle stays plain text —
+// guessing would send people to the wrong profile.
+const PLATFORMS = [
+  { re: /\b(?:instagram|insta|ig)\b/i,  url: h => 'https://instagram.com/' + h,   name: 'Instagram' },
+  { re: /\btik\s?tok\b/i,               url: h => 'https://tiktok.com/@' + h,     name: 'TikTok' },
+  // Bare "X" is too common a word to use as a keyword, so it only counts when
+  // written as a label ("X: @someone") or as twitter/x.com.
+  { re: /\b(?:twitter|x\.com)\b|(?:^|\s)x\s*[:：]\s*@/i,
+    url: h => 'https://x.com/' + h, name: 'X' },
+  { re: /\byoutube\b/i,                 url: h => 'https://youtube.com/@' + h,    name: 'YouTube' },
+  { re: /\b(?:facebook|fb)\b/i,         url: h => 'https://facebook.com/' + h,    name: 'Facebook' },
+  { re: /\bthreads\b/i,                 url: h => 'https://threads.net/@' + h,    name: 'Threads' },
+  { re: /\btelegram\b/i,                url: h => 'https://t.me/' + h,            name: 'Telegram' },
+  { re: /\bgithub\b/i,                  url: h => 'https://github.com/' + h,      name: 'GitHub' },
+  { re: /\blinkedin\b/i,                url: h => 'https://linkedin.com/in/' + h, name: 'LinkedIn' },
+  { re: /\btwitch\b/i,                  url: h => 'https://twitch.tv/' + h,       name: 'Twitch' },
+];
+
+// One platform named → use it. Several → ambiguous at this scope, so defer to
+// a narrower one (the line) rather than picking arbitrarily.
+function detectPlatform(text) {
+  const hits = PLATFORMS.filter(p => p.re.test(text));
+  return hits.length === 1 ? hits[0] : null;
+}
+
+let messagePlatform = null;   // platform for the reply currently being rendered
+
+// Code annotations and decorators that look like handles. Without this, a
+// reply that happens to mention Instagram would turn "@media" or "@app.route"
+// into a profile link.
+const HANDLE_DENY = new Set([
+  'media', 'keyframes', 'import', 'charset', 'font-face', 'supports',
+  'param', 'params', 'return', 'returns', 'throws', 'override', 'deprecated',
+  'since', 'author', 'see', 'example', 'todo', 'fixme', 'note', 'link',
+  'app', 'route', 'get', 'post', 'put', 'patch', 'delete', 'staticmethod',
+  'classmethod', 'property', 'dataclass', 'pytest', 'mock', 'test', 'fixture',
+  'component', 'injectable', 'input', 'output', 'directive', 'ngmodule',
+  'autowired', 'entity', 'table', 'column', 'controller', 'service', 'bean',
+  'click', 'command', 'decorator', 'wraps', 'cache', 'type', 'types',
+]);
+
+const INLINE_SRC = [
+  '(`+)([\\s\\S]*?)\\1',          // `code`
+  '\\*\\*\\*([\\s\\S]+?)\\*\\*\\*',   // ***bold italic***
+  '\\*\\*([\\s\\S]+?)\\*\\*',     // **bold**
+  '~~([\\s\\S]+?)~~',             // ~~strike~~
+  '\\*([^*\\n]+?)\\*',            // *italic*
+  '\\[([^\\]]*)\\]\\(([^)\\s]+)\\)',  // [text](url) — before autolink so it wins
+  // bare URL / domain, not preceded by a word char, @ or dot
+  '(?<![\\w@.])((?:https?://|www\\.)[^\\s<>()]+'
+    + '|' + HOST + '(?:' + TLD_SAFE + ')' + PATH
+    + '|' + HOST + '(?:' + TLD_RISKY + ')/[^\\s<>()]*)',
+  // @handle — the lookbehind keeps it off email addresses
+  '(?<![\\w@.])@([a-z0-9](?:[a-z0-9._]{0,28}[a-z0-9])?)',
+].join('|');
+
+function inline(target, text) {
+  // A fresh regex per call: inline() recurses for nested emphasis, and a
+  // shared /g/ regex would have its lastIndex clobbered by the inner call.
+  const re = new RegExp(INLINE_SRC, 'gi');
+  // This line's own platform wins ("TikTok: @a" inside an Instagram post);
+  // otherwise the reply-wide one applies.
+  const platform = detectPlatform(text) || messagePlatform;
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) {
+      target.appendChild(document.createTextNode(text.slice(last, m.index)));
+    }
+    if (m[2] !== undefined) {
+      const code = document.createElement('code');
+      code.textContent = m[2].trim();
+      target.appendChild(code);
+    } else if (m[3] !== undefined) {
+      const strong = document.createElement('strong');
+      const em = document.createElement('em');
+      inline(em, m[3]);
+      strong.appendChild(em);
+      target.appendChild(strong);
+    } else if (m[4] !== undefined) {
+      const el = document.createElement('strong');
+      inline(el, m[4]);
+      target.appendChild(el);
+    } else if (m[5] !== undefined) {
+      const el = document.createElement('del');
+      inline(el, m[5]);
+      target.appendChild(el);
+    } else if (m[6] !== undefined) {
+      const el = document.createElement('em');
+      inline(el, m[6]);
+      target.appendChild(el);
+    } else if (m[7] !== undefined) {
+      target.appendChild(link(m[7], m[8]));
+    } else if (m[9] !== undefined) {
+      autolink(target, m[9]);
+    } else if (m[10] !== undefined) {
+      handleLink(target, m[10], platform);
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) {
+    target.appendChild(document.createTextNode(text.slice(last)));
+  }
+}
+
+function link(label, href) {
+  // Only http(s)/mailto become real links; anything else stays plain text so a
+  // javascript: or data: URL can never end up clickable.
+  if (!/^(https?:\/\/|mailto:)/i.test(href)) {
+    return document.createTextNode(label + ' (' + href + ')');
+  }
+  const a = document.createElement('a');
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.textContent = label || href;
+  return a;
+}
+
+// A bare URL found in prose. Sentence punctuation that trails the URL is not
+// part of it, so it is put back as plain text.
+function autolink(target, raw) {
+  const url = raw.replace(/[.,;:!?'")\]]+$/, '');
+  const trailing = raw.slice(url.length);
+  const a = document.createElement('a');
+  a.href = /^https?:\/\//i.test(url) ? url : 'https://' + url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.textContent = url;
+  target.appendChild(a);
+  if (trailing) target.appendChild(document.createTextNode(trailing));
+}
+
+// "@someone" becomes a profile link only when the surrounding text says which
+// platform it belongs to.
+function handleLink(target, handle, platform) {
+  const clean = handle.replace(/[._]+$/, '');
+  const lower = clean.toLowerCase();
+  const denied = HANDLE_DENY.has(lower) || HANDLE_DENY.has(lower.split('.')[0]);
+  if (!platform || !clean || denied) {
+    target.appendChild(document.createTextNode('@' + handle));
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = platform.url(clean);
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.title = platform.name + ': @' + clean;
+  a.textContent = '@' + clean;
+  target.appendChild(a);
+  if (handle.length > clean.length) {
+    target.appendChild(document.createTextNode(handle.slice(clean.length)));
+  }
+}
+
+function codeBlock(lines, lang) {
+  const wrap = document.createElement('div');
+  wrap.className = 'code-wrap';
+  const pre = document.createElement('pre');
+  const code = document.createElement('code');
+  if (lang) code.className = 'language-' + lang.replace(/[^\w+-]/g, '');
+  code.textContent = lines.join('\n');
+  pre.appendChild(code);
+  wrap.append(pre, copyButton(() => code.textContent, 'Salin kode'));
+  return wrap;
+}
+
+function cells(line) {
+  let row = line.trim();
+  if (row.startsWith('|')) row = row.slice(1);
+  if (row.endsWith('|')) row = row.slice(0, -1);
+  return row.split('|').map(c => c.trim());
+}
+
+function table(header, rows) {
+  const wrap = document.createElement('div');
+  wrap.className = 'table-wrap';
+  const el = document.createElement('table');
+
+  const thead = document.createElement('thead');
+  const hrow = document.createElement('tr');
+  for (const c of header) {
+    const th = document.createElement('th');
+    inline(th, c);
+    hrow.appendChild(th);
+  }
+  thead.appendChild(hrow);
+  el.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    for (let i = 0; i < header.length; i++) {
+      const td = document.createElement('td');
+      inline(td, r[i] || '');
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  el.appendChild(tbody);
+  wrap.appendChild(el);
+  return wrap;
+}
+
+// Consecutive list lines -> nested <ul>/<ol>, using indent width for depth.
+function list(items, ordered) {
+  const root = document.createElement(ordered ? 'ol' : 'ul');
+  const stack = [{ indent: -1, el: root }];
+  for (const item of items) {
+    while (stack.length > 1 && item.indent <= stack[stack.length - 1].indent) {
+      stack.pop();
+    }
+    let parent = stack[stack.length - 1].el;
+    if (item.indent > stack[stack.length - 1].indent && stack.length > 1) {
+      // deeper than the current level: nest a fresh list inside the last item
+      const lastLi = parent.lastElementChild;
+      if (lastLi) {
+        const sub = document.createElement(item.ordered ? 'ol' : 'ul');
+        lastLi.appendChild(sub);
+        stack.push({ indent: item.indent, el: sub });
+        parent = sub;
+      }
+    } else if (stack.length === 1) {
+      stack.push({ indent: item.indent, el: root });
+    }
+    const li = document.createElement('li');
+    inline(li, item.text);
+    parent.appendChild(li);
+  }
+  return root;
+}
+
+function parseBlocks(text) {
+  const lines = text.split('\n');
+  const out = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // fenced code — an unclosed fence still renders as code while streaming
+    const fence = line.match(FENCE);
+    if (fence) {
+      const lang = fence[1].trim();
+      const buf = [];
+      i++;
+      while (i < lines.length && !FENCE.test(lines[i])) buf.push(lines[i++]);
+      i++;   // consume the closing fence if present
+      out.push(codeBlock(buf, lang));
+      continue;
+    }
+
+    if (!line.trim()) { i++; continue; }
+
+    if (RULE.test(line)) { out.push(document.createElement('hr')); i++; continue; }
+
+    const heading = line.match(HEADING);
+    if (heading) {
+      const h = document.createElement('h' + heading[1].length);
+      inline(h, heading[2]);
+      out.push(h);
+      i++;
+      continue;
+    }
+
+    if (QUOTE.test(line)) {
+      const buf = [];
+      while (i < lines.length && QUOTE.test(lines[i])) {
+        buf.push(lines[i].match(QUOTE)[1]);
+        i++;
+      }
+      const bq = document.createElement('blockquote');
+      for (const node of parseBlocks(buf.join('\n'))) bq.appendChild(node);
+      out.push(bq);
+      continue;
+    }
+
+    // table: a header row followed by a |---|---| separator
+    if (line.includes('|') && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1])
+        && lines[i + 1].includes('-')) {
+      const header = cells(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+        rows.push(cells(lines[i]));
+        i++;
+      }
+      out.push(table(header, rows));
+      continue;
+    }
+
+    if (BULLET.test(line) || NUMBER.test(line)) {
+      const ordered = NUMBER.test(line);
+      const items = [];
+      while (i < lines.length) {
+        const b = lines[i].match(BULLET), n = lines[i].match(NUMBER);
+        if (!b && !n) break;
+        const m = b || n;
+        items.push({
+          indent: m[1].length,
+          text: m[3],
+          ordered: !!n,
+        });
+        i++;
+      }
+      out.push(list(items, ordered));
+      continue;
+    }
+
+    // paragraph: consecutive plain lines, single newlines kept as breaks
+    const buf = [];
+    while (i < lines.length && lines[i].trim() && !FENCE.test(lines[i])
+           && !HEADING.test(lines[i]) && !QUOTE.test(lines[i])
+           && !BULLET.test(lines[i]) && !NUMBER.test(lines[i])
+           && !RULE.test(lines[i])) {
+      buf.push(lines[i]);
+      i++;
+    }
+    const p = document.createElement('p');
+    buf.forEach((l, idx) => {
+      if (idx) p.appendChild(document.createElement('br'));
+      inline(p, l);
+    });
+    out.push(p);
+  }
+  return out;
+}
+
+function render(el, text, markdown) {
+  el.textContent = '';
+  el._source = markdown ? text : null;   // what "copy" should hand over
+  if (!markdown) {                     // user text and errors stay literal
+    el.textContent = text;
+    return;
+  }
+  messagePlatform = detectPlatform(text);
+  for (const node of parseBlocks(text)) el.appendChild(node);
+}
+
+// Re-parsing the whole reply on every delta would be quadratic on long
+// answers, so coalesce to at most one render per animation frame.
+let renderQueued = false;
+function renderSoon(el, text) {
+  el._markdown = text;
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    render(el, el._markdown, true);
+    scroll();
+  });
+}
+
+function addMsg(role, text) {
+  const empty = log.querySelector('.empty');
+  if (empty) empty.remove();
+  const msg = document.createElement('div');
+  msg.className = 'msg ' + role;
+  const label = document.createElement('div');
+  label.className = 'role';
+  label.textContent = role === 'user' ? 'Anda' : role === 'error' ? 'Kesalahan' : 'Qwen';
+  const body = document.createElement('div');
+  body.className = 'body';
+  render(body, text, role === 'assistant');
+  msg.append(label, body);
+  log.appendChild(msg);
+  scroll();
+  return body;
+}
+
+// --- scrolling -------------------------------------------------------------
+// Auto-scroll only while the reader is parked at the bottom. Scrolling up
+// detaches; the floating button re-attaches.
+const logEl = document.getElementById('log');
+const followBtn = document.getElementById('follow');
+const NEAR_BOTTOM = 60;   // px of slack, so a hair off the end still counts
+let following = true;
+let streaming = false;
+
+function atBottom() {
+  return logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight <= NEAR_BOTTOM;
+}
+
+function syncFollowBtn() {
+  followBtn.classList.toggle('show', !following);
+  followBtn.classList.toggle('pending', !following && streaming);
+}
+
+function scroll(force) {
+  if (force) following = true;
+  if (following) {
+    logEl.scrollTop = logEl.scrollHeight;
+    // Re-pin once layout settles — the composer can grow a line, or a code
+    // block can render tall, after we've already jumped.
+    requestAnimationFrame(() => { if (following) logEl.scrollTop = logEl.scrollHeight; });
+  }
+  syncFollowBtn();
+}
+
+logEl.addEventListener('scroll', () => {
+  const wasFollowing = following;
+  following = atBottom();
+  if (wasFollowing !== following) syncFollowBtn();
+  else if (!following && streaming) syncFollowBtn();
+}, { passive: true });
+
+// Assign scrollTop rather than scrollTo({behavior:'smooth'}): smooth scrolling
+// is silently ignored in some browser contexts, which would leave the button
+// hidden while the view stayed put.
+followBtn.addEventListener('click', () => {
+  scroll(true);
+  focusInput();
+});
+
+// Collapsible "thinking" panel, inserted above the answer body. It stays
+// closed — the elapsed counter is the only thing the reader needs while the
+// model is still thinking; the text is there if they want it.
+function addThinking(body, text, summaryText, startedAt) {
+  const el = document.createElement('details');
+  el.className = 'think';
+  el.open = false;
+  const summary = document.createElement('summary');
+  const pre = document.createElement('div');
+  pre.className = 'reasoning';
+  pre.textContent = text || '';
+  el.append(summary, pre);
+  body.parentNode.insertBefore(el, body);
+
+  const panel = { el, summary, pre, timer: null };
+  if (summaryText) {
+    summary.textContent = summaryText;
+    return panel;
+  }
+
+  // Live: tick the elapsed seconds once a second until the answer starts.
+  const started = startedAt || Date.now();
+  const tick = () => {
+    const secs = Math.floor((Date.now() - started) / 1000);
+    summary.textContent = 'Berpikir… ' + secs + 's';
+  };
+  tick();
+  panel.timer = setInterval(tick, 1000);
+  return panel;
+}
+
+function stopThinking(panel, label) {
+  if (!panel) return;
+  if (panel.timer) {
+    clearInterval(panel.timer);
+    panel.timer = null;
+  }
+  if (label) panel.summary.textContent = label;
+}
+
+function webChipText(count, done) {
+  if (!done) return '🌐 Mencari di web…';
+  return count
+    ? '🌐 Dijawab dari ' + count + ' sumber web'
+    : '🌐 Pencarian tidak menemukan apa pun';
+}
+
+// Sources list appended under a reply that used web search.
+function addSources(body, list) {
+  if (!list || !list.length) return;
+  body.parentNode.querySelector('.sources')?.remove();
+  const box = document.createElement('div');
+  box.className = 'sources';
+  const head = document.createElement('div');
+  head.className = 'head';
+  head.textContent = 'Sumber';
+  const ol = document.createElement('ol');
+  for (const s of list) {
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = s.url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = s.title || s.url;
+    const host = document.createElement('span');
+    host.className = 'host';
+    try { host.textContent = '  ' + new URL(s.url).hostname.replace(/^www\./, ''); }
+    catch (e) { host.textContent = ''; }
+    li.append(a, host);
+    ol.appendChild(li);
+  }
+  box.append(head, ol);
+  body.parentNode.appendChild(box);
+}
+
+// Web search is always in keyword-detection mode. A per-message override is
+// still available by prefixing "/web", which the server strips.
+const WEB_MODE = 'auto';
+
+// The composer reflects the session on screen: locked while that session is
+// answering, free as soon as you move to another one.
+// ion-textarea reports `undefined` until it hydrates, so never touch .value bare.
+function composerText() {
+  return (input.value || '').trim();
+}
+
+function syncComposer() {
+  const active = currentStream();
+  input.disabled = !!active;
+
+  if (active) {
+    // Stop: must stay clickable, and must not submit the form.
+    actionBtn.type = 'button';
+    actionBtn.setAttribute('color', 'danger');
+    actionBtn.setAttribute('aria-label', 'Hentikan jawaban');
+    actionBtn.textContent = '■';
+    actionBtn.disabled = false;
+  } else {
+    actionBtn.type = 'submit';
+    actionBtn.removeAttribute('color');
+    actionBtn.setAttribute('aria-label', 'Kirim pesan');
+    actionBtn.textContent = '↑';
+    actionBtn.disabled = !composerText() && !pending.length;
+  }
+
+  if (active) {
+    hint.textContent = 'Menunggu jawaban di chat ini… buka atau buat chat lain '
+      + 'kalau ingin bertanya sekarang.';
+  } else if (streams.size) {
+    hint.textContent = streams.size + ' chat lain sedang berjalan di latar.';
+  } else {
+    hint.textContent = defaultHint;
+  }
+}
+
+// ion-textarea keeps its real <textarea> in shadow DOM, so focus goes through
+// its own method.
+// Ionic's auto-grow never applies here — the composer restyles the control it
+// depends on, and it silently leaves the height at one row. Drive it directly
+// so the box follows the message, which is the whole point of this layout.
+const GROW_MAX = 176;
+function growInput() {
+  const ta = input.querySelector('textarea');
+  if (!ta) return;
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, GROW_MAX) + 'px';
+}
+
+function focusInput() {
+  if (typeof input.setFocus === 'function') input.setFocus();
+  else input.focus();
+}
+
+function clearLog(message) {
+  log.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = 'empty';
+
+  const mark = document.createElement('div');
+  mark.className = 'empty-mark';
+  mark.textContent = '✦';
+
+  const title = document.createElement('p');
+  title.className = 'empty-title';
+  title.textContent = message || 'Mulai percakapan';
+
+  const sub = document.createElement('p');
+  sub.className = 'empty-sub';
+  sub.textContent = 'Ketik pesan di bawah. Awali dengan /web untuk memaksa pencarian.';
+
+  box.append(mark, title, sub);
+  log.appendChild(box);
+  scroll(true);
+}
+
+// --- sessions --------------------------------------------------------------
+async function loadSessions() {
+  let d;
+  try {
+    d = await fetch('/api/sessions').then(r => r.json());
+  } catch (e) {
+    return;   // server unreachable: keep the sidebar as it is, no crash
+  }
+  if (!d || !d.sessions) return;
+  sessionList.innerHTML = '';
+  if (!d.sessions.length) {
+    const p = document.createElement('p');
+    p.className = 'side-empty';
+    p.textContent = 'Belum ada chat tersimpan.';
+    sessionList.appendChild(p);
+    return;
+  }
+  for (const s of d.sessions) {
+    // A reply still running on the server — pick it back up after a reload.
+    if (s.streaming && !streams.has('s' + s.id)) attachStream(s);
+    const row = document.createElement('div');
+    row.className = 'session' + (s.id === sessionId ? ' active' : '');
+    row.dataset.id = s.id;
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = s.title || 'Untitled';
+    const sub = document.createElement('span');
+    sub.className = 'sub';
+    const running = [...streams.values()].some(r => r.sessionId === s.id);
+    sub.textContent = running
+      ? 'menjawab…'
+      : s.messages + ' msg · ' + s.updated_at.replace('T', ' ').replace('Z', '');
+    meta.append(name, sub);
+
+    // A dot marks a chat that finished while you were reading another one.
+    let dot = null;
+    if (running || unread.has(s.id)) {
+      dot = document.createElement('span');
+      dot.className = 'dot' + (running ? ' live' : '');
+      dot.title = running ? 'Sedang menjawab' : 'Jawaban baru belum dibaca';
+    }
+
+    // One affordance instead of a row of icons; the actions live in a menu.
+    const more = document.createElement('button');
+    more.className = 'act';
+    more.type = 'button';
+    more.textContent = '⋮';
+    more.setAttribute('aria-label', 'Tindakan chat');
+    more.addEventListener('click', e => {
+      e.stopPropagation();
+      openRowMenu(e, s.id);
+    });
+
+    if (dot) row.append(meta, dot, more); else row.append(meta, more);
+    row.addEventListener('click', () => openSession(s.id));
+    // ⋮ is the discoverable route; double-click stays as a shortcut.
+    name.addEventListener('dblclick', e => {
+      e.stopPropagation();
+      startRename(meta, name, s);
+    });
+    sessionList.appendChild(row);
+  }
+}
+
+function startRename(meta, name, s) {
+  const field = document.createElement('input');
+  field.className = 'rename';
+  field.value = s.title || '';
+  meta.replaceChild(field, name);
+  field.focus();
+  field.select();
+  const commit = async save => {
+    const title = field.value.trim();
+    if (save && title && title !== s.title) {
+      await fetch('/api/sessions/' + s.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      if (s.id === sessionId) setPageTitle(title);
+    }
+    loadSessions();
+  };
+  field.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); commit(true); }
+    if (e.key === 'Escape') commit(false);
+  });
+  field.addEventListener('blur', () => commit(true));
+  field.addEventListener('click', e => e.stopPropagation());
+}
+
+// On a phone the drawer covers the conversation, so picking a chat has to
+// close it. In split-pane mode the menu is disabled and close() is a no-op.
+async function closeMenu() {
+  const menu = document.querySelector('ion-menu');
+  try {
+    if (menu && await menu.isOpen()) await menu.close();
+  } catch (e) { /* menu not ready yet */ }
+}
+
+// Leaving a session detaches its stream from the screen but lets it finish.
+function detachViews() {
+  for (const rec of streams.values()) {
+    // The panel is about to be discarded; its ticking timer must go with it.
+    if (rec.view && rec.view.think) stopThinking(rec.view.think);
+    rec.view = null;
+    rec.viewing = false;
+  }
+}
+
+// --- row context menu ------------------------------------------------------
+const rowMenu = document.getElementById('rowMenu');
+let menuTargetId = null;
+
+function openRowMenu(event, id) {
+  menuTargetId = id;
+  rowMenu.hidden = false;
+  // Anchor under the ⋮ that opened it, nudged inside the viewport.
+  const r = event.currentTarget.getBoundingClientRect();
+  const box = rowMenu.getBoundingClientRect();
+  const left = Math.min(r.left, window.innerWidth - box.width - 8);
+  const top = r.bottom + box.height > window.innerHeight ? r.top - box.height - 4
+                                                         : r.bottom + 4;
+  rowMenu.style.left = Math.max(8, left) + 'px';
+  rowMenu.style.top = top + 'px';
+}
+
+function closeRowMenu() {
+  rowMenu.hidden = true;
+  menuTargetId = null;
+}
+
+// Anything outside the menu closes it.
+document.addEventListener('click', e => {
+  if (!rowMenu.hidden && !rowMenu.contains(e.target)) closeRowMenu();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !rowMenu.hidden) closeRowMenu();
+});
+sessionList.addEventListener('scroll', () => { if (!rowMenu.hidden) closeRowMenu(); });
+
+// Look the row up again when the action runs: the sidebar re-renders often, so
+// DOM nodes captured when the menu opened may already be detached.
+function startRenameById(id) {
+  const row = sessionList.querySelector('.session[data-id="' + id + '"]');
+  if (!row) return;
+  const name = row.querySelector('.name');
+  startRename(row.querySelector('.meta'), name, { id, title: name.textContent });
+}
+
+document.getElementById('menuRename').addEventListener('click', () => {
+  const id = menuTargetId;
+  closeRowMenu();
+  startRenameById(id);
+});
+
+document.getElementById('menuDelete').addEventListener('click', async () => {
+  const id = menuTargetId;
+  closeRowMenu();
+  if (id == null) return;
+  await fetch('/api/sessions/' + id, { method: 'DELETE' });
+  if (id === sessionId) newChat();
+  loadSessions();
+});
+
+async function openSession(id) {
+  closeMenu();
+  detachViews();
+  let d;
+  try {
+    d = await fetch('/api/sessions/' + id).then(r => r.json());
+  } catch (e) {
+    hint.textContent = 'Tidak bisa memuat chat: ' + e.message;
+    return;
+  }
+  if (d.error) { hint.textContent = d.error; return; }
+
+  sessionId = id;
+  setPageTitle(d.session.title);
+
+  clearLog('Chat ini masih kosong');
+  if (d.messages.length) log.innerHTML = '';
+  for (const m of d.messages) {
+    if (m.role === 'user') {
+      const b = addMsg('user', m.content);
+      addMessageFiles(b, m.attachments);
+    } else {
+      const body = addMsg('assistant', m.content);
+      if (m.reasoning) addThinking(body, m.reasoning, 'Proses berpikir');
+      addMessageFiles(body, m.attachments);
+      addSources(body, m.sources);
+      if (m.content) addCopyAction(body);
+    }
+  }
+
+  unread.delete(id);
+  localStorage.setItem('lastSession', id);
+  reattach(id);          // a reply still running here resumes on screen
+  loadSessions();
+  syncComposer();
+  if (!currentStream()) focusInput();
+  scroll(true);   // opening a chat lands you at the newest message
+}
+
+// Rebuild the live bubble for a session that is still answering, so returning
+// to it shows the text so far and keeps streaming into it.
+function reattach(id) {
+  const rec = [...streams.values()].find(r => r.sessionId === id);
+  if (!rec) return;
+  // The user message is already on screen: openSession rendered it from the
+  // database, where the server stored it before generating.
+  const body = addMsg('assistant', '');
+  body.classList.add('cursor');
+  rec.view = { body, think: null, webChip: null };
+  if (rec.reasoning) {
+    rec.view.think = addThinking(body, rec.reasoning,
+      rec.reply ? 'Proses berpikir' : null, rec.started);
+  }
+  if (rec.webSearch) {
+    showWebChip(rec, rec.citations.length
+      ? webChipText(rec.citations.length, true)
+      : '🌐 Mencari di web…');
+  }
+  if (rec.reply) render(body, rec.reply, true);
+  if (rec.citations.length) addSources(body, rec.citations);
+}
+
+function newChat() {
+  closeMenu();
+  detachViews();
+  localStorage.removeItem('lastSession');
+  sessionId = null;
+  setPageTitle('');
+  clearLog();
+  loadSessions();
+  syncComposer();
+  focusInput();
+}
+
+document.getElementById('new').addEventListener('click', newChat);
+
+// The whole rounded box reads as the typing area, so clicking its padding —
+// not just the text line — should focus the message field.
+document.querySelector('.composer').addEventListener('mousedown', e => {
+  if (e.target.closest('ion-button, textarea')) return;
+  e.preventDefault();
+  focusInput();
+});
+
+// --- preferences & memory --------------------------------------------------
+const overlay = document.getElementById('overlay');
+const instructionsEl = document.getElementById('instructions');
+const prefsStatus = document.getElementById('prefsStatus');
+const memList = document.getElementById('memList');
+const memText = document.getElementById('memText');
+
+function openPrefs() {
+  loadPrefs();
+  loadMemories();
+  overlay.isOpen = true;             // ion-modal handles backdrop and Escape
+}
+
+function closePrefs() { overlay.isOpen = false; }
+
+document.getElementById('openPrefs').addEventListener('click', openPrefs);
+document.getElementById('closePrefs').addEventListener('click', closePrefs);
+overlay.addEventListener('didDismiss', () => { overlay.isOpen = false; });
+
+async function loadPrefs() {
+  const d = await fetch('/api/prefs').then(r => r.json());
+  instructionsEl.value = d.response_instructions || '';
+}
+
+async function saveInstructions() {
+  const d = await fetch('/api/prefs', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ response_instructions: instructionsEl.value }),
+  }).then(r => r.json());
+  prefsStatus.textContent = d.error ? d.error : 'Saved.';
+  setTimeout(() => { prefsStatus.textContent = ''; }, 2000);
+}
+
+document.getElementById('saveInstructions').addEventListener('click', saveInstructions);
+
+function renderMemories(memories) {
+  memList.innerHTML = '';
+  if (!memories.length) {
+    const p = document.createElement('p');
+    p.className = 'note';
+    p.textContent = 'Belum ada yang diingat.';
+    memList.appendChild(p);
+    return;
+  }
+  for (const m of memories) {
+    const row = document.createElement('div');
+    row.className = 'mem' + (m.pinned ? ' pinned' : '');
+
+    const text = document.createElement('div');
+    text.className = 'text';
+    text.textContent = m.text;
+    const when = document.createElement('span');
+    when.className = 'when';
+    when.textContent = m.created_at.replace('T', ' ').replace('Z', '');
+    text.appendChild(when);
+
+    const pin = document.createElement('button');
+    pin.className = 'pin';
+    pin.type = 'button';
+    pin.textContent = m.pinned ? '★' : '☆';
+    pin.title = m.pinned ? 'Always included — click to unpin' : 'Pin: always include';
+    pin.addEventListener('click', async () => {
+      const d = await fetch('/api/memories/' + m.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinned: !m.pinned }),
+      }).then(r => r.json());
+      if (d.memories) renderMemories(d.memories);
+    });
+
+    const rm = document.createElement('button');
+    rm.className = 'rm';
+    rm.type = 'button';
+    rm.textContent = '×';
+    rm.title = 'Forget this';
+    rm.addEventListener('click', async () => {
+      const d = await fetch('/api/memories/' + m.id, { method: 'DELETE' })
+        .then(r => r.json());
+      if (d.memories) renderMemories(d.memories);
+    });
+
+    row.append(text, pin, rm);
+    memList.appendChild(row);
+  }
+}
+
+async function loadMemories() {
+  const d = await fetch('/api/memories').then(r => r.json());
+  renderMemories(d.memories || []);
+}
+
+async function addMemory() {
+  const text = memText.value.trim();
+  if (!text) return;
+  const d = await fetch('/api/memories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  }).then(r => r.json());
+  memText.value = '';
+  if (d.memories) renderMemories(d.memories);
+  memText.focus();
+}
+
+document.getElementById('memAdd').addEventListener('click', addMemory);
+memText.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); addMemory(); }
+});
+
+// Reopen the chat that was on screen before a reload, so a reply still being
+// generated carries on in front of the reader rather than only in the sidebar.
+(async () => {
+  await loadSessions();
+  const last = parseInt(localStorage.getItem('lastSession') || '', 10);
+  if (last) await openSession(last);
+})();
+syncComposer();   // the action button starts in its idle state
+
+// --- chat ------------------------------------------------------------------
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  const text = composerText();
+  if ((!text && !pending.length) || currentStream()) return;
+  input.value = '';
+  growInput();
+  const files = pending;
+  pending = [];
+  renderPending();
+  sendMessage(text, false, files);
+});
+
+// `retry` re-sends a message that already failed. The bubble for it is still
+// on screen and the server may already have stored it, so neither side adds it
+// twice.
+async function sendMessage(text, retry, files) {
+  if (streams.size >= MAX_CONCURRENT) {
+    hint.textContent = 'Maksimal ' + MAX_CONCURRENT
+      + ' chat berjalan bersamaan — tunggu salah satunya selesai.';
+    return;
+  }
+  const key = currentKey() || ('new' + (++tempKey));
+  if (streams.has(key)) return;      // one reply at a time within a session
+
+  const rec = {
+    key, sessionId, text,
+    reply: '', reasoning: '', citations: [],
+    webSearch: false, query: '',
+    started: Date.now(),
+    controller: new AbortController(),
+    view: null,
+    viewing: true,
+  };
+  streams.set(key, rec);
+
+  rec.files = files || [];
+  if (!retry) {
+    const userBody = addMsg('user', text);
+    if (rec.files.length) {
+      // Show what was sent straight away, from the local copy.
+      addMessageFiles(userBody, rec.files.map((f, i) => ({
+        id: null, name: f.name, size: f.size,
+        kind: f.mime.startsWith('image/') ? 'image' : 'document',
+        localPreview: f.preview,
+      })));
+    }
+    scroll(true);   // sending re-attaches, wherever you were reading
+  }
+  const firstBody = addMsg('assistant', '');
+  firstBody.classList.add('cursor');
+  rec.view = { body: firstBody, think: null, webChip: null };
+
+  streaming = true;
+  syncComposer();
+  loadSessions();
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: rec.sessionId,
+        content: text,
+        web: WEB_MODE,
+        retry: !!retry,
+        attachments: (files || []).map(f => ({ name: f.name, mime: f.mime, data: f.data })),
+      }),
+      signal: rec.controller.signal,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+
+    // The server creates the session on the first message and reports its id.
+    const created = res.headers.get('X-Session-Id');
+    if (created && rec.sessionId === null) {
+      rec.sessionId = parseInt(created, 10);
+      streams.delete(rec.key);
+      rec.key = 's' + rec.sessionId;
+      streams.set(rec.key, rec);
+      if (rec.viewing) {                 // still the chat on screen
+        sessionId = rec.sessionId;
+        localStorage.setItem('lastSession', sessionId);
+        setPageTitle(text.slice(0, 60));
+      }
+      loadSessions();
+    }
+
+    await consume(rec, res);
+  } catch (err) {
+    handleStreamError(rec, err, text);
+  } finally {
+    finishStream(rec);
+  }
+}
+
+// Follow a reply the server is already producing — after a reload, or for a
+// chat that kept running while we were elsewhere.
+async function attachStream(session) {
+  if (streams.has('s' + session.id)) return;
+  const rec = {
+    key: 's' + session.id, sessionId: session.id, text: '',
+    reply: '', reasoning: '', citations: [],
+    webSearch: false, query: '',
+    started: Date.now(),
+    controller: new AbortController(),
+    view: null,
+    viewing: session.id === sessionId,
+    fromHistory: true,          // the user message is already on screen
+  };
+  streams.set(rec.key, rec);
+  if (rec.viewing) {
+    const body = addMsg('assistant', '');
+    body.classList.add('cursor');
+    rec.view = { body, think: null, webChip: null };
+    scroll();
+  }
+  streaming = true;
+  syncComposer();
+  loadSessions();
+
+  try {
+    const res = await fetch('/api/stream/' + session.id,
+                            { signal: rec.controller.signal });
+    if (!res.ok) return;        // finished between listing and attaching
+    await consume(rec, res);
+  } catch (err) {
+    if (err.name !== 'AbortError') console.warn('attach gagal', err);
+  } finally {
+    finishStream(rec);
+  }
+}
+
+// Read one SSE response into a stream record, rendering when it is on screen.
+async function consume(rec, res) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    // Drain to end of stream rather than stopping at [DONE]: the server saves
+    // the reply just before closing, and the sidebar refresh must see it.
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (payload === '[DONE]') continue;
+        let chunk;
+        try { chunk = JSON.parse(payload); } catch { continue; }
+        if (chunk.error) throw new Error(chunk.error.message || JSON.stringify(chunk.error));
+
+        const v = rec.view;   // null while this chat is off screen
+
+        if (chunk.tool) {
+          rec.toolPanel = v ? addToolPanel(v.body, chunk.tool.name, chunk.tool.args || {}) : null;
+          if (v) scroll();
+          continue;
+        }
+        if (chunk.tool_result) {
+          finishToolPanel(rec.toolPanel, chunk.tool_result.result || {});
+          rec.toolPanel = null;
+          if (v) scroll();
+          continue;
+        }
+        if (chunk.files) {
+          rec.producedFiles = chunk.files;
+          continue;
+        }
+        if (chunk.status) {
+          if (chunk.status.searching) {
+            rec.webSearch = true;
+            showWebChip(rec, '\ud83c\udf10 Mencari di web…');
+          }
+          const saved = chunk.status.memories_saved || 0;
+          if (saved > 0 && v) {
+            const chip = document.createElement('div');
+            chip.className = 'saved-chip';
+            chip.textContent = saved === 1 ? '\ud83e\udde0 Disimpan ke memori'
+                                           : '\ud83e\udde0 Disimpan ' + saved + ' memori';
+            chip.title = 'Kelola di Preferensi & memori';
+            v.body.closest('.msg').previousElementSibling.appendChild(chip);
+            scroll();
+          }
+          continue;
+        }
+
+        // Our own events: search results arrive before the model starts.
+        if (chunk.sources) {
+          rec.citations = chunk.sources;
+          rec.query = chunk.query || '';
+          if (v && v.webChip) {
+            v.webChip.textContent = rec.citations.length
+              ? '\ud83c\udf10 Dicari: \u201c' + rec.query + '\u201d'
+              : '\ud83c\udf10 Pencarian tidak menemukan apa pun';
+          }
+          if (v) { addSources(v.body, rec.citations); scroll(); }
+          continue;
+        }
+        if (chunk.web_error) {
+          if (v && v.webChip) {
+            v.webChip.textContent = '\ud83c\udf10 Pencarian gagal, dijawab tanpa web';
+          }
+          continue;
+        }
+
+        const d = chunk.choices?.[0]?.delta || {};
+
+        if (d.annotations) {
+          for (const a of d.annotations) {
+            const c = a.url_citation;
+            if (c && c.url && !rec.citations.some(s => s.url === c.url)) {
+              rec.citations.push({ title: c.title || c.url, url: c.url });
+            }
+          }
+        }
+
+        // Thinking models send `reasoning` for a while before any `content`.
+        if (d.reasoning) {
+          rec.reasoning += d.reasoning;
+          if (v) {
+            if (!v.think) v.think = addThinking(v.body, '', null, rec.started);
+            v.think.pre.textContent = rec.reasoning;
+            v.think.pre.scrollTop = v.think.pre.scrollHeight;
+            scroll();
+          }
+        }
+
+        if (d.content) {
+          // Some models open with blank lines after the think phase.
+          if (!rec.reply) {
+            d.content = d.content.replace(/^\s+/, '');
+            if (!d.content) continue;
+          }
+          if (!rec.reply && v) {
+            // First real token: the search is done and thinking has ended.
+            if (v.think) {
+              stopThinking(v.think, 'Berpikir '
+                + ((Date.now() - rec.started) / 1000).toFixed(1) + ' detik');
+            }
+            if (v.webChip && rec.citations.length) {
+              v.webChip.textContent = webChipText(rec.citations.length, true);
+            }
+          }
+          rec.reply += d.content;
+          if (v) renderSoon(v.body, rec.reply);
+        }
+      }
+    }
+}
+
+// A failure leaves the message one click from being sent again.
+function handleStreamError(rec, err, text) {
+  if (err.name === 'AbortError') return;
+  if (rec.view) {
+    rec.view.body.closest('.msg').remove();
+    showError(err.message, text);
+  }
+  rec.failed = true;
+}
+
+// Common teardown for both paths: settle the view, mark unread, free the slot.
+function finishStream(rec) {
+  streams.delete(rec.key);
+  const v = rec.view;
+  if (v) {
+    v.body.classList.remove('cursor');
+    if (rec.reply) {
+      render(v.body, rec.reply, true);
+      addCopyAction(v.body);
+    }
+    if (rec.producedFiles && rec.producedFiles.length) {
+      // The ids only exist once stored, so reload the message from the server.
+      refreshFiles(rec.sessionId, v.body);
+    }
+    if (v.webChip) v.webChip.textContent = webChipText(rec.citations.length, true);
+    addSources(v.body, rec.citations);
+    if (v.think && !rec.reply) {
+      stopThinking(v.think, 'Dihentikan setelah '
+        + ((Date.now() - rec.started) / 1000).toFixed(1) + ' detik');
+    } else {
+      stopThinking(v.think);
+    }
+  } else if (!rec.failed && rec.sessionId !== null) {
+    unread.add(rec.sessionId);      // finished while you were reading elsewhere
+  }
+  streaming = streams.size > 0;
+  syncFollowBtn();
+  syncComposer();
+  loadSessions();
+}
+
+// The web chip lives above the reply and has to survive leaving and returning.
+function showWebChip(rec, label) {
+  if (!rec.view) return;
+  const chip = document.createElement('div');
+  chip.className = 'saved-chip';
+  chip.textContent = label;
+  rec.view.body.parentNode.insertBefore(chip, rec.view.body);
+  rec.view.webChip = chip;
+}
+
+// An error keeps the failed message one click away from being sent again —
+// "Failed to fetch" is usually the server being restarted, and retyping a long
+// prompt to recover from that is pure friction.
+function showError(message, text) {
+  const body = addMsg('error', message);
+  const actions = document.createElement('div');
+  actions.className = 'err-actions';
+
+  const again = document.createElement('button');
+  again.type = 'button';
+  again.textContent = '↻ Coba lagi';
+  again.addEventListener('click', () => {
+    body.closest('.msg').remove();
+    sendMessage(text, true);
+  });
+
+  const edit = document.createElement('button');
+  edit.type = 'button';
+  edit.className = 'ghost';
+  edit.textContent = 'Ubah pesan';
+  edit.title = 'Kembalikan teks ke kolom ketik';
+  edit.addEventListener('click', () => {
+    input.value = text;
+    growInput();
+    focusInput();
+  });
+
+  actions.append(again, edit);
+  body.appendChild(actions);
+  scroll();
+}
+
+actionBtn.addEventListener('click', e => {
+  const rec = currentStream();
+  if (!rec) return;            // idle: let the form's submit handler run
+  e.preventDefault();
+  rec.controller.abort();
+});
+
+input.addEventListener('input', () => { growInput(); syncComposer(); });
+
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    form.requestSubmit();
+  }
+});
+
+
+</script>
+</body>
+</html>

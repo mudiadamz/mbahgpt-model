@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+chats.db
+chats.db-wal
+chats.db-shm
+
+# UI assets: run ./fetch-vendor.sh to install
+vendor/
