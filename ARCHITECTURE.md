@@ -26,7 +26,7 @@ berbagi satu inti: CLI (`qwen.py`) dan web UI (`server.py` + `index.html`).
 | Python stdlib saja, tanpa build step | Jalan di Python 3.9 bawaan macOS. `pip install` dan bundler adalah titik gagal yang tidak perlu untuk alat lokal. |
 | API key tidak pernah sampai browser | Halaman bicara ke server lokal; server yang bicara ke OpenRouter. |
 | SQLite sebagai sumber kebenaran | Browser hanya mengirim satu pesan baru; konteks dibangun ulang dari database. Reload atau tab kedua tidak pernah kehilangan percakapan. |
-| Aman secara default | Bind ke loopback, CSP ketat, dan menolak start kalau diekspos tanpa autentikasi. |
+| Aman secara default | Bind ke loopback, CSP ketat, dan menolak start kalau diekspos tanpa autentikasi. Dilayani ke internet lewat nginx (§9.2), bukan dengan membuka bind-nya. |
 
 ---
 
@@ -38,10 +38,15 @@ db.py          306  Skema SQLite + semua akses data
 memory.py     120  Ekstraksi "remember this…" + pemeringkatan relevansi
 tools.py      193  Eksekusi skrip terbatas + berkas hasil (opt-in)
 web.py        177  Deteksi kebutuhan search, ekspansi query, eksekusi search
-security.py   171  Kebijakan hardening: CSRF, rebinding, token, CSP, rate limit
-server.py      888  HTTP server, routing, orkestrasi satu giliran chat
+security.py   214  Kebijakan hardening: CSRF, rebinding, token, CSP, rate limit,
+                   daftar putih host publik + kepercayaan pada proxy
+server.py      901  HTTP server, routing, orkestrasi satu giliran chat
 index.html   2446  UI Ionic + renderer markdown + manajemen stream
 fetch-vendor.sh 61 Pengambil aset Ionic (terverifikasi hash)
+mbahgpt.service 34 Unit systemd: jalankan server sebagai daemon (§9.1)
+install-service.sh 35 Pemasang unit: tulis ulang path, enable, start
+nginx-mbahgpt.conf 120 vhost mbahgpt.com: TLS, redirect, proxy SSE (§9.2)
+install-site.sh 109 Cek DNS, terbitkan sertifikat, pasang vhost, uji hasilnya
 
 CLAUDE.md      92  Aturan kerja di repo: kewajiban memperbarui dokumen ini,
                    perintah verifikasi angka, batasan yang tidak boleh dilanggar
@@ -265,13 +270,16 @@ dengan pencarian web untuk pekerjaan sensitif.
 ### 5.6 Keamanan
 
 Ancamannya bukan orang asing di internet (server bind ke loopback), melainkan
-segala hal lain yang menyentuh mesin ini.
+segala hal lain yang menyentuh mesin ini. **Kecuali** saat `OPENROUTER_PUBLIC_HOST`
+diisi: sejak itu orang asing di internet memang bagian dari model ancaman, dan
+token menjadi wajib (§9.2).
 
 | Ancaman | Penanganan |
 |---|---|
 | Halaman web mana pun POST ke `127.0.0.1` (CSRF) | Tolak `Origin` asing → 403 |
 | DNS rebinding | Pin header `Host` → 400 |
 | Bind `0.0.0.0` tanpa proteksi | **Menolak start** tanpa `OPENROUTER_UI_TOKEN` |
+| Dilayani lewat nama domain tanpa proteksi | **Menolak start** kalau `OPENROUTER_PUBLIC_HOST` diisi tanpa token |
 | Kunci API terbaca user lain | `.env` dan `chats.db` di-chmod 600 saat start |
 | Body raksasa | Batas 256 KB → 413 |
 | Boros kredit / abuse | Rate limit 30 chat/menit per IP → 429 |
@@ -283,6 +291,21 @@ diblokir kebijakan berbasis nonce. Ionic mengekspor `setNonce`, jadi nonce dari
 server diteruskan ke runtime-nya — `unsafe-inline` tetap tidak dipakai.
 `script-src` butuh `'self'` karena Ionic memuat chunk-nya lewat `import()`
 dinamis.
+
+**Host & Origin di belakang proxy.** `host_allowed()` semula hanya menerima
+loopback atau alamat bind, jadi permintaan dengan `Host: mbahgpt.com` ditolak 400
+walau proxy-nya benar. Perbaikannya adalah daftar putih eksplisit
+(`OPENROUTER_PUBLIC_HOST`), **bukan** menyuruh nginx menimpa `Host` dan `Origin`
+dengan `127.0.0.1`. Cara timpa itu memang membuat halaman jalan, tapi sekaligus
+mematikan dua penjaga sekaligus: setiap POST lintas situs dari mana pun akan
+terlihat sebagai same-origin di mata server.
+
+**X-Forwarded-\* hanya dari loopback.** Header itu ditulis klien dan tidak bisa
+dipercaya secara umum; `OPENROUTER_TRUST_PROXY=1` pun hanya berlaku kalau peer
+TCP-nya loopback (yaitu nginx di mesin ini). Tanpa itu dua hal rusak diam-diam di
+belakang proxy: rate limiter melihat semua orang sebagai `127.0.0.1` sehingga 30
+chat/menit menjadi kuota bersama seluruh internet, dan cookie token tidak pernah
+ditandai `Secure`.
 
 **Sisa risiko yang diketahui:** hasil web search masuk ke system prompt, jadi
 halaman yang di-crawl bisa memuat prompt injection. Tidak ada perbaikan tuntas;
@@ -503,7 +526,9 @@ isi file.
 | `OPENROUTER_API_KEY` | — | Wajib |
 | `OPENROUTER_MODEL` | `qwen/qwen3.8-27b` | Model chat |
 | `OPENROUTER_TEMPERATURE` | `0.7` | Sampling |
-| `OPENROUTER_UI_TOKEN` | kosong | Wajib untuk bind non-loopback |
+| `OPENROUTER_UI_TOKEN` | kosong | Wajib untuk bind non-loopback **atau** `PUBLIC_HOST` |
+| `OPENROUTER_PUBLIC_HOST` | kosong | Domain yang dilayani lewat proxy, dipisah koma (§9.2) |
+| `OPENROUTER_TRUST_PROXY` | `0` | `1` = percayai `X-Forwarded-For/-Proto` dari proxy loopback |
 | `OPENROUTER_RATE_LIMIT` | `30` | Chat per menit per klien (0 = mati) |
 | `OPENROUTER_MAX_BODY` | `262144` | Batas body request |
 | `OPENROUTER_MAX_HISTORY` | `40` | Pesan yang dikirim ulang tiap giliran |
@@ -530,8 +555,11 @@ pesan itu yang menjangkarkan follow-up pendek.
    harus selalu berlaku.
 3. **Link dibuat dari pola teks, bukan verifikasi.** Kalau model mengarang
    username, link tetap terbentuk dan mengarah ke halaman kosong.
-4. **HTTP polos.** Untuk paparan jaringan sungguhan, taruh di belakang reverse
-   proxy ber-TLS; tanpa itu token dan isi chat lewat sebagai teks biasa.
+4. ~~**HTTP polos.**~~ **Teratasi untuk mbahgpt.com** (§9.2): nginx memegang TLS
+   Let's Encrypt, HTTP dialihkan ke HTTPS, dan HSTS aktif. Yang tetap berlaku:
+   server Python sendiri hanya bicara HTTP polos di loopback, jadi paparan lewat
+   nama domain lain **harus** melalui proxy yang sama — bind langsung ke
+   `0.0.0.0` mengirim token sebagai teks biasa.
 5. **URL berkurung** seperti `en.wikipedia.org/wiki/Foo_(bar)` terpotong di kurung
    buka.
 6. **Riwayat dipotong di 40 pesan** — percakapan sangat panjang kehilangan bagian
@@ -555,3 +583,157 @@ Bind non-loopback butuh token:
 OPENROUTER_UI_TOKEN=$(python3 -c "import secrets;print(secrets.token_urlsafe(32))") \
   ./server.py --host 0.0.0.0
 ```
+
+### 9.1 Sebagai daemon (systemd)
+
+```bash
+./install-service.sh              # pasang unit, enable, start
+./install-service.sh --uninstall  # lepas kembali
+
+systemctl status mbahgpt.service
+journalctl -u mbahgpt.service -f  # log server: stdout/stderr masuk journald
+```
+
+`install-service.sh` menyalin `mbahgpt.service` ke `/etc/systemd/system/` sambil
+menulis ulang path repo, `User=`, dan `Group=` sesuai tempat pemasangan — jadi
+berkas unit di repo tidak perlu diedit saat repo dipindah. Ia juga menjalankan
+`./fetch-vendor.sh` kalau `vendor/ionic` belum ada; tanpa itu layanan hidup tapi
+halamannya tidak merender.
+
+Keputusan yang perlu diingat:
+
+- **Kredensial tetap dari `.env`, bukan dari unit.** Tidak ada `EnvironmentFile=`
+  ke `.env`: kunci API sudah dibaca `qwen.load_env` dari `WorkingDirectory`, dan
+  menyalinnya ke `/etc` hanya menggandakan rahasia ke berkas yang dapat dibaca
+  lebih luas. `security.protect_file` tetap mengetatkan `.env` dan `chats.db` ke
+  0600 saat start — terlihat di journal sebagai baris `note: tightened permissions`.
+- **`PYTHONUNBUFFERED=1`.** Tanpa ini stderr Python dibuffer karena journald
+  bukan TTY, dan baris `serving on …` baru muncul jauh belakangan.
+- **`ProtectHome` sengaja tidak dipakai.** Repo, `.env`, dan `chats.db` ada di
+  `/home`, jadi menyembunyikan `/home` mematikan layanan. Hardening lain
+  (`NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=full`, `ProtectKernel*`,
+  `RestrictSUIDSGID`, `LockPersonality`) tetap aktif.
+- **`Restart=on-failure` + `RestartSec=3`.** Proses mati (mis. OOM kill) hidup
+  lagi dalam ~3 detik. Salah konfigurasi tidak berputar selamanya:
+  `security.startup_check` keluar dengan kode 1 saat bind non-loopback tanpa
+  token (§5.6), dan setelah 5 percobaan dalam 10 detik (default
+  `StartLimitBurst`) unit berhenti di status `failed` — alasannya terbaca di
+  `journalctl`, bukan tenggelam dalam restart tak berujung.
+- **Bind default `--host 127.0.0.1 --port 8000`.** Mengubahnya ke alamat non-
+  loopback butuh `OPENROUTER_UI_TOKEN` di `.env`, kalau tidak unit gagal start.
+
+### 9.2 Di balik domain (nginx + Let's Encrypt)
+
+`mbahgpt.com` dilayani nginx di mesin ini, yang mem-proxy ke `127.0.0.1:8000`.
+Server Python **tetap** bind loopback: satu-satunya pintu dari internet adalah
+nginx, dan itu yang memegang TLS.
+
+```bash
+./install-site.sh --email you@example.com   # sertifikat + vhost + verifikasi
+./install-site.sh --uninstall               # lepas vhost, sertifikat dibiarkan
+```
+
+Prasyarat di sisi DNS — record A ke IP publik mesin ini (Namecheap: Domain List →
+Manage → Advanced DNS):
+
+```
+A    @      <ip publik>
+A    www    <ip publik>
+```
+
+`install-site.sh` memeriksa itu lebih dulu dan berhenti dengan instruksi kalau
+belum menyebar; tanpa pemeriksaan itu, kegagalan muncul jauh di dalam certbot
+sebagai error yang tidak menjelaskan apa-apa (yang menjawab tantangan ACME adalah
+server lain — halaman parkir registrar).
+
+Tiga berkas nginx di level `http` sudah ada sebelumnya dan dipakai apa adanya:
+`conf.d/10-hardening.conf` (timeout slowloris, zona `limit_req`, peta `$block_ua`
+dan `$bad_path`, format log `antibot`), `conf.d/20-vhost.conf` (peta
+`$connection_upgrade`, pengecualian ACME), dan `sites-enabled/000-catch-all`
+(Host tak dikenal → 444).
+
+Keputusan yang perlu diingat:
+
+- **Urutan: sertifikat dulu, vhost kemudian.** `nginx-mbahgpt.conf` menunjuk ke
+  `/etc/letsencrypt/live/mbahgpt.com/`, dan nginx menolak start kalau berkas itu
+  belum ada. Sertifikat pertama diterbitkan mode `certonly --webroot` lewat
+  webroot ACME milik catch-all — jalur yang sengaja dibiarkan hidup di
+  `20-vhost.conf` justru untuk kasus ini.
+- **`certonly`, bukan installer nginx.** Kalau certbot mengedit sendiri berkas
+  vhost, salinan di repo dan yang terpasang di `/etc` akan pelan-pelan berbeda.
+  Konsekuensinya: parameter TLS ditulis eksplisit di vhost, karena berkas
+  `options-ssl-nginx.conf` milik plugin itu tidak dijamin ada.
+- **`proxy_buffering off`.** Ini bukan penyetelan performa, tapi syarat agar
+  streaming tetap streaming. Dengan buffering default nginx menahan potongan SSE
+  sampai buffernya penuh: halaman diam beberapa detik lalu seluruh jawaban muncul
+  sekaligus. `gzip off` untuk alasan yang sama.
+- **`proxy_read_timeout 600s`.** Harus lebih longgar dari `OPENROUTER_TIMEOUT`
+  (120 s) ditambah pencarian web dan putaran tool, kalau tidak nginx memutus
+  stream yang sebenarnya masih hidup.
+- **`Host` dan `Origin` diteruskan asli**, dan server menerimanya karena ada di
+  `OPENROUTER_PUBLIC_HOST` — alasannya di §5.6.
+- **`www` → apex, bukan dua situs.** Token disimpan sebagai cookie per host, jadi
+  dua nama berarti dua sesi login yang membingungkan.
+- **Tanpa OCSP stapling.** Sertifikat Let's Encrypt sudah tidak memuat URL OCSP
+  responder, jadi `ssl_stapling on` hanya menghasilkan peringatan di log setiap
+  kali nginx dimuat ulang, tanpa manfaat.
+- **HSTS tanpa `includeSubDomains`.** Subdomain lain `mbahgpt.com` belum tentu
+  ber-TLS; HSTS yang terlalu lebar mematikannya tanpa jalan mundur cepat.
+- **Hook reload setelah perpanjangan.** `certbot.timer` hanya menulis berkas baru;
+  nginx masih memegang sertifikat lama di memori. `renewal-hooks/deploy/reload-nginx.sh`
+  yang menutup celah itu.
+- **`curl` dari luar dijawab 444, bukan 200.** `$block_ua` di `10-hardening.conf`
+  menolak library HTTP mentah dari IP tak tepercaya; lewat HTTP/2 itu terlihat
+  sebagai `PROTOCOL_ERROR` di sisi curl. Uji dari luar butuh `-A` user-agent
+  browser — dari loopback tidak, karena loopback termasuk `$trusted_ip`.
+
+### 9.3 Perpanjangan TLS otomatis
+
+Tidak ada cron atau skrip sendiri: yang dipakai adalah `certbot.timer` bawaan
+paket Debian/Ubuntu, ditambah satu deploy hook. Angka-angka di bawah dibaca dari
+unit dan berkas renewal di mesin ini, bukan dari ingatan.
+
+| Bagian | Nilai | Sumber |
+|---|---|---|
+| Jadwal | `OnCalendar=*-*-* 00,12:00:00`, `RandomizedDelaySec=43200`, `Persistent=true` | `certbot.timer` |
+| Perintah | `certbot -q renew --no-random-sleep-on-renew` | `certbot.service` |
+| Ambang perpanjangan | 30 hari sebelum kedaluwarsa | `renewal/mbahgpt.com.conf` |
+| Metode | `authenticator = webroot`, `/var/www/letsencrypt` untuk apex dan `www` | `renewal/mbahgpt.com.conf` |
+| Setelah berhasil | `renewal-hooks/deploy/reload-nginx.sh` → `systemctl reload nginx` | hook |
+
+Dua hal yang membuat rantai ini mudah patah tanpa terasa:
+
+1. **Blok ACME harus di atas redirect 301.** Tantangan ACME datang lewat http
+   polos ke nama domainnya. Setelah vhost `mbahgpt.com` ada, permintaan itu tidak
+   lagi jatuh ke catch-all, jadi `location ^~ /.well-known/acme-challenge/` di
+   blok port 80 vhost inilah yang menjawabnya. Kalau urutannya tertukar, yang
+   diterima Let's Encrypt adalah 301 dan perpanjangan gagal — 60 hari setelah
+   penerbitan, saat tidak ada yang sedang memperhatikan.
+2. **`--dry-run` tidak menjalankan deploy hook** (certbot mencatatnya sebagai
+   "Dry run: skipping deploy hook command"). Jadi dry-run yang sukses **bukan**
+   bukti nginx akan memuat sertifikat baru; hook-nya harus diuji terpisah.
+
+Cara memverifikasi keduanya:
+
+```bash
+# 1. Jalur ACME lewat vhost sungguhan — harus 200 dan isinya "ok", bukan 301.
+echo ok | sudo tee /var/www/letsencrypt/.well-known/acme-challenge/probe >/dev/null
+curl -sS -A "Mozilla/5.0" http://mbahgpt.com/.well-known/acme-challenge/probe
+sudo rm /var/www/letsencrypt/.well-known/acme-challenge/probe
+
+# 2. Simulasi perpanjangan penuh (butuh ~1-4 menit, memakai server staging).
+sudo certbot renew --dry-run
+
+# 3. Hook-nya sendiri: worker nginx harus berganti PID dan situs tetap hidup.
+sudo /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+
+# Kapan sertifikat sekarang habis, dan kapan timer berikutnya jalan:
+sudo certbot certificates | grep -A1 mbahgpt.com
+systemctl list-timers certbot.timer
+```
+
+**Kalau perpanjangan gagal**, sinyalnya ada di dua tempat: `journalctl -u
+certbot.service` di mesin ini, dan email peringatan kedaluwarsa dari Let's Encrypt
+ke alamat yang didaftarkan saat penerbitan pertama. Tidak ada pemantauan aktif
+untuk itu di repo ini — jendelanya 30 hari, jadi kegagalan sekali dua kali masih
+punya banyak ruang untuk diperbaiki.

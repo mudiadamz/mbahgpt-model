@@ -26,6 +26,22 @@ import time
 UI_TOKEN = os.environ.get("OPENROUTER_UI_TOKEN", "").strip()
 COOKIE_NAME = "chatbox_session"
 
+# Nama domain yang dilayani lewat reverse proxy, selain loopback. Browser
+# mengirim "Host: mbahgpt.com" sementara server tetap bind ke 127.0.0.1, jadi
+# tanpa daftar ini penjaga rebinding menolak setiap permintaan dengan 400.
+# Daftar putih eksplisit, bukan "terima semua Host": nama yang tidak ada di sini
+# tetap ditolak, dan Origin lintas situs tetap gagal seperti sebelumnya.
+PUBLIC_HOSTS = frozenset(
+    h.strip().lower() for h in
+    os.environ.get("OPENROUTER_PUBLIC_HOST", "").split(",") if h.strip())
+
+# Di belakang proxy, setiap koneksi datang dari 127.0.0.1 — rate limiter per
+# klien akan runtuh jadi satu keranjang bersama, dan cookie tidak akan pernah
+# ditandai Secure. X-Forwarded-* hanya dipercaya kalau ini dinyalakan DAN peer
+# memang loopback; dari klien langsung, header itu dikendalikan penyerang.
+TRUST_PROXY = os.environ.get("OPENROUTER_TRUST_PROXY", "").strip().lower() in (
+    "1", "true", "yes", "on")
+
 # Bodies are small JSON messages; anything larger is a mistake or an attack.
 MAX_BODY_BYTES = int(os.environ.get("OPENROUTER_MAX_BODY", str(256 * 1024)))
 
@@ -54,7 +70,24 @@ def host_allowed(host_header, bind_host):
     host = strip_port(host_header).lower()
     if not host:
         return False
-    return is_loopback(host) or host == bind_host.lower()
+    return (is_loopback(host) or host == bind_host.lower()
+            or host in PUBLIC_HOSTS)
+
+
+def client_ip(peer, forwarded_for):
+    """Alamat klien sesungguhnya, hanya kalau proxy layak dipercaya."""
+    if not (TRUST_PROXY and is_loopback(peer)):
+        return peer
+    # Proxy menambah alamatnya di ujung kanan; yang paling kiri adalah klien.
+    first = (forwarded_for or "").split(",")[0].strip()
+    return first or peer
+
+
+def is_secure(peer, forwarded_proto):
+    """True kalau permintaan tiba lewat HTTPS di sisi proxy."""
+    if not (TRUST_PROXY and is_loopback(peer)):
+        return False
+    return (forwarded_proto or "").strip().lower() == "https"
 
 
 def origin_allowed(origin, bind_host):
@@ -160,6 +193,16 @@ def protect_file(path):
 
 def startup_check(bind_host):
     """Refuse configurations that would expose the API key to a network."""
+    # Bind loopback di belakang proxy tetap terbuka ke internet lewat nama
+    # domainnya, jadi syarat tokennya sama saja dengan bind non-loopback.
+    if PUBLIC_HOSTS and not UI_TOKEN:
+        sys.exit(
+            "refusing to serve %s without authentication.\n"
+            "OPENROUTER_PUBLIC_HOST makes this server reachable by name through "
+            "a reverse proxy; anyone who resolves it could spend your "
+            "OpenRouter credit and read your chat history.\n"
+            "Set OPENROUTER_UI_TOKEN=<secret>, or unset OPENROUTER_PUBLIC_HOST."
+            % ", ".join(sorted(PUBLIC_HOSTS)))
     if is_loopback(bind_host):
         return
     if not UI_TOKEN:

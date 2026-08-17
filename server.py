@@ -307,6 +307,15 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def peer_ip(self):
+        """Alamat untuk rate limiting: klien asli kalau di belakang proxy."""
+        return security.client_ip(self.client_address[0],
+                                  self.headers.get("X-Forwarded-For"))
+
+    def over_https(self):
+        return security.is_secure(self.client_address[0],
+                                  self.headers.get("X-Forwarded-Proto"))
+
     def authenticated(self):
         cookie = security.cookie_value(self.headers.get("Cookie"))
         if security.token_matches(cookie):
@@ -366,9 +375,13 @@ class Handler(BaseHTTPRequestHandler):
         query = urllib.parse.urlparse(self.path).query
         supplied = urllib.parse.parse_qs(query).get("token", [""])[0]
         if security.UI_TOKEN and supplied and security.token_matches(supplied):
-            extra.append(("Set-Cookie",
-                          "%s=%s; Path=/; HttpOnly; SameSite=Strict"
-                          % (security.COOKIE_NAME, supplied)))
+            # Secure hanya saat memang lewat HTTPS: menandainya di localhost
+            # (http polos) akan membuat browser membuang cookienya.
+            flags = "Path=/; HttpOnly; SameSite=Strict"
+            if self.over_https():
+                flags += "; Secure"
+            extra.append(("Set-Cookie", "%s=%s; %s"
+                          % (security.COOKIE_NAME, supplied, flags)))
         self.send_bytes(page.encode(), "text/html; charset=utf-8", extra=extra)
 
     def serve_vendor(self, path):
@@ -538,7 +551,7 @@ class Handler(BaseHTTPRequestHandler):
         The browser sends only the new message; context is rebuilt from SQLite,
         and the reply is written back there when the stream ends.
         """
-        if not RATE.allow(self.client_address[0]):
+        if not RATE.allow(self.peer_ip()):
             self.send_json({"error": "too many requests, slow down"}, 429)
             return
 
