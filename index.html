@@ -497,14 +497,14 @@
   }
 
   ion-footer ion-toolbar { --padding-start: .7rem; --padding-end: .7rem;
-                           --padding-top: .5rem; --padding-bottom: .5rem; }
+                           --padding-top: .35rem; --padding-bottom: .45rem; }
 
   /* --- composer: one rounded surface -------------------------------------- */
   .composer {
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 26px;
-    padding: .7rem .8rem .55rem 1.05rem;
+    border-radius: 20px;
+    padding: .35rem .4rem .35rem .85rem;
     box-shadow: var(--shadow-md);
     transition: border-color .15s ease, box-shadow .15s ease;
   }
@@ -521,7 +521,12 @@
     --padding-bottom: 0;
     --highlight-height: 0;          /* no Material underline inside the pill */
     --placeholder-opacity: .55;
-    min-height: 2.6rem;
+    /* Setinggi satu baris saja. Nilai sebelumnya (2.6rem) menyisakan ruang
+       kosong sebesar satu baris di atas deretan tombol — kotaknya terlihat jauh
+       lebih besar daripada isinya. Tinggi sungguhan diatur growInput(). */
+    min-height: 1.5rem;
+    /* 1rem = 16px: di iOS, field di bawah 16px memicu zoom otomatis saat
+       disentuh. Jangan diperkecil untuk merapikan tampilan. */
     font-size: 1rem;
   }
   /* Scoped component: reach the real control directly. Width is explicit —
@@ -533,6 +538,7 @@
     border: 0;
     background: transparent;
     padding: 0;
+    line-height: 1.45;
     max-height: 11rem;
     overflow-y: auto;
   }
@@ -541,11 +547,11 @@
   .composer-bar {
     display: flex;
     align-items: center;
-    gap: .4rem;
-    margin-top: .3rem;
+    gap: .3rem;
+    margin-top: .15rem;
   }
   .composer-bar { justify-content: flex-end; }
-  #attachBtn { margin-right: auto; font-size: 1.35rem; --color: var(--muted); }
+  #attachBtn { margin-right: auto; font-size: 1.1rem; --color: var(--muted); }
   #attachBtn:hover { --color: var(--accent); }
 
   /* --- tool activity ------------------------------------------------------ */
@@ -641,16 +647,29 @@
   }
   .msg-files .doc:hover { border-color: var(--accent); }
 
-  /* Circular send / stop, sitting inside the composer. */
+  /* Circular send / stop, sitting inside the composer.
+     min-width/min-height wajib ada, bukan hiasan. ion-button membawa tinggi
+     minimumnya sendiri — di mode md `:host { min-height: 36px }`, di mode ios
+     `:host { min-height: 3.1em }` — dan min-height MENGALAHKAN height. Tanpa
+     dua baris di bawah, tombol selebar 32px tapi setinggi minimum Ionic:
+     lingkarannya berubah jadi elips. Yang paling parah mode ios, karena 3.1em
+     mengikuti font-size: tombol lampiran (font lebih besar) jadi ~67px tinggi
+     dan menarik seluruh kotak komposer ikut membengkak. Ukuran dikunci di
+     kedua sumbu supaya tidak bergantung mode. */
   .round-action {
     --border-radius: 50%;
     --padding-start: 0;
     --padding-end: 0;
+    --padding-top: 0;
+    --padding-bottom: 0;
     --box-shadow: none;
-    width: 2.75rem;      /* 44px: comfortable touch target */
-    height: 2.75rem;
+    flex: 0 0 auto;
+    width: 2rem;         /* 32px di layar lebar: kursor tidak butuh 44px */
+    height: 2rem;
+    min-width: 2rem;
+    min-height: 2rem;
     margin: 0;
-    font-size: 1.15rem;
+    font-size: 1rem;
     line-height: 1;
   }
   .round-action::part(native) { border-radius: 50%; }
@@ -666,6 +685,10 @@
     .wrap { max-width: none; }
     .msg { margin-bottom: 1rem; }
     .hint { margin-left: .6rem; }
+    /* Jari butuh sasaran lebih besar daripada kursor; 36px masih jauh di bawah
+       tinggi komposer sebelumnya. */
+    .round-action { width: 2.25rem; height: 2.25rem;
+                    min-width: 2.25rem; min-height: 2.25rem; }
   }
 </style>
 <script type="module">

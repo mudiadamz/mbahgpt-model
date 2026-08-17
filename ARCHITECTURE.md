@@ -41,12 +41,12 @@ web.py        177  Deteksi kebutuhan search, ekspansi query, eksekusi search
 security.py   214  Kebijakan hardening: CSRF, rebinding, token, CSP, rate limit,
                    daftar putih host publik + kepercayaan pada proxy
 server.py      901  HTTP server, routing, orkestrasi satu giliran chat
-index.html   2446  UI Ionic + renderer markdown + manajemen stream
+index.html   2469  UI Ionic + renderer markdown + manajemen stream
 fetch-vendor.sh 61 Pengambil aset Ionic (terverifikasi hash)
 mbahgpt.service 34 Unit systemd: jalankan server sebagai daemon (§9.1)
 install-service.sh 35 Pemasang unit: tulis ulang path, enable, start
-nginx-mbahgpt.conf 120 vhost mbahgpt.com: TLS, redirect, proxy SSE (§9.2)
-install-site.sh 109 Cek DNS, terbitkan sertifikat, pasang vhost, uji hasilnya
+nginx-mbahgpt.conf 121 vhost mbahgpt.com: TLS, redirect, proxy SSE (§9.2)
+install-site.sh 144 Cek DNS, terbitkan sertifikat, pasang vhost, uji hasilnya
 
 CLAUDE.md      92  Aturan kerja di repo: kewajiban memperbarui dokumen ini,
                    perintah verifikasi angka, batasan yang tidak boleh dilanggar
@@ -453,15 +453,27 @@ Keputusan yang membentuk tampilannya:
 
 ### 6.9 Komposer
 
-Area ketik adalah satu permukaan membulat (radius 26 px) yang memuat semuanya:
-teks di atas, toggle web di kiri bawah, tombol kirim bundar di kanan bawah.
-Kontrol berada **di dalam** kotak, bukan berjajar di sebelahnya — supaya yang
-dominan secara visual adalah tempat mengetik, bukan tombolnya.
+Area ketik adalah satu permukaan membulat (radius 20 px) yang memuat semuanya:
+teks di atas, tombol lampiran (`+`) di kiri bawah, tombol kirim bundar di kanan
+bawah. Kontrol berada **di dalam** kotak, bukan berjajar di sebelahnya — supaya
+yang dominan secara visual adalah tempat mengetik, bukan tombolnya.
 
 - Mengklik bagian mana pun dari kotak menaruh kursor di kolom pesan, bukan hanya
   baris teksnya.
+- **Saat kosong, kotaknya setinggi satu baris.** `#input` ber-`min-height: 1.5rem`
+  (24 px) — persis satu baris pada `font-size: 1rem` / `line-height: 1.45` — dan
+  padding komposer `.35rem .4rem .35rem .85rem`. Angka lama (`min-height: 2.6rem`,
+  padding `.7rem … 1.05rem`) menyisakan ruang kosong sebesar satu baris penuh di
+  atas deretan tombol: kotaknya terlihat jauh lebih besar daripada isinya.
+  Baris `min-height` itu wajib ada, bukan penghias: bawaan `ion-textarea` adalah
+  `min-height: 44px` pada host-nya, jadi menghapus baris kita membuat kotaknya
+  melompat balik ke hampir dua baris. (Selektor `#input` menang karena id
+  mengalahkan kelas scoped `.sc-ion-textarea-*-h` milik Ionic.)
+- `font-size` komposer **tidak boleh** di bawah `1rem` (16 px): Safari iOS
+  memperbesar halaman otomatis saat field ber-font lebih kecil disentuh.
 - Tinggi mengikuti isi sampai 176 px, lalu berhenti dan menggulir.
-- **Satu tombol, dua peran** (44 px, target sentuh). Saat idle ia tombol kirim
+- **Satu tombol, dua peran** (32 px di desktop, 36 px di lebar ≤767 px karena
+  jari butuh sasaran lebih besar daripada kursor). Saat idle ia tombol kirim
   (`type="submit"`, nonaktif kalau komposer kosong); saat menjawab ia berubah jadi
   tombol berhenti (`type="button"`, warna danger). Dua tombol di posisi yang sama
   berarti salah satunya selalu menganggur.
@@ -483,6 +495,20 @@ tidak memunculkan error:
    `<input>` bagian dalamnya ada di light DOM, jadi aturan global
    `textarea, input { … }` ikut mengecatnya. Sekarang aturan itu hanya menyasar
    kontrol native milik aplikasi (`#instructions`, `#memText`, `input.rename`).
+3. **`ion-button` membawa `min-height` sendiri, dan `min-height` mengalahkan
+   `height`.** Aturan `:host`-nya (dibaca dari chunk `ion-button` di
+   `vendor/ionic/`): `min-height: 36px` di mode md, `min-height: 3.1em` di mode
+   ios. Jadi `.round-action { width: …; height: …; border-radius: 50% }` saja
+   tidak cukup — tombolnya selebar yang kita minta tapi setinggi minimum Ionic,
+   dan **lingkaran berubah jadi elips**. Yang paling merusak mode ios: 3.1em
+   mengikuti `font-size`, sehingga tombol lampiran (fontnya lebih besar demi
+   glif `+`) tumbuh sampai ~67 px dan menarik seluruh tinggi komposer ikut naik.
+   Karena itu `.round-action` mengunci **empat** properti — `width`, `height`,
+   `min-width`, `min-height` — bukan dua. Halaman luar selalu menang atas
+   `:host`, jadi mengunci min-height juga membuat tampilannya tidak lagi
+   bergantung pada mode yang dideteksi Ionic (md di desktop/Android, ios di
+   iPhone/iPad); ini juga sebab satu-satunya keluhan "kotak input terlalu besar"
+   bisa muncul di ponsel tapi tidak di desktop.
 
 Konsekuensi lain: `auto-grow` bawaan `ion-textarea` tidak bekerja setelah kontrol
 di dalamnya di-restyle — tingginya diam di satu baris tanpa error. Pertumbuhan
